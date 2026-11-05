@@ -104,20 +104,27 @@ describe("E2: assert.deepEqual is structural", () => {
     expect(eq("[1,,3]", "[1,undefined,3]")).toBe(false);
     expect(eq("[1,2]", "[1,2,3]")).toBe(false);
   });
-  it("E2: Date, Map and Set compare by content", () => {
+  it("E2: Date compares by time", () => {
     expect(eq("new Date(5)", "new Date(5)")).toBe(true);
     expect(eq("new Date(5)", "new Date(6)")).toBe(false);
-    expect(eq("new Map([[1,{a:1}]])", "new Map([[1,{a:1}]])")).toBe(true);
-    expect(eq("new Map([[1,2]])", "new Map([[1,3]])")).toBe(false);
-    expect(eq("new Set([1,2])", "new Set([2,1])")).toBe(true);
-    expect(eq("new Set([1])", "new Set([2])")).toBe(false);
   });
-  it("E2: prototypes must match", () => {
+  it("E2: arrays and objects are different kinds", () => {
     expect(eq("[]", "{}")).toBe(false);
-    expect(eq("Object.create(null)", "{}")).toBe(false);
   });
-  it("E2: cyclic structures do not hang", () => {
-    const code = "var a={}; a.self=a; var b={}; b.self=b;";
-    expect(runTests({ code, tests: "test('t',()=>assert.deepEqual(a,b));" }).results[0]?.passed).toBe(true);
+  const PLAIN_ONLY = "deepEqual supports plain data only (objects, arrays, primitives, Date); compare Map/Set/cycles/class instances manually";
+  const msg = (a: string, b: string, code = "") =>
+    runTests({ code, tests: `test('t',()=>assert.deepEqual(${a},${b}));` }).results[0]?.message;
+  it("E2: Map, Set, functions, symbols, typed arrays and class instances throw the plain-data error", () => {
+    expect(msg("new Map()", "new Map()")).toBe(PLAIN_ONLY);
+    expect(msg("new Set([1])", "new Set([1])")).toBe(PLAIN_ONLY);
+    expect(msg("function(){}", "1")).toBe(PLAIN_ONLY);
+    expect(msg("Symbol('a')", "Symbol('a')")).toBe(PLAIN_ONLY);
+    expect(msg("new Uint8Array(1)", "new Uint8Array(1)")).toBe(PLAIN_ONLY);
+    expect(msg("{a:new Map()}", "{a:1}")).toBe(PLAIN_ONLY);
+    expect(msg("new P()", "new P()", "class P {}")).toBe(PLAIN_ONLY);
+    expect(msg("Object.create(null)", "{}")).toBe(PLAIN_ONLY);
+  });
+  it("E2: cyclic structures throw the plain-data error", () => {
+    expect(msg("a", "b", "var a={}; a.self=a; var b={}; b.self=b;")).toBe(PLAIN_ONLY);
   });
 });
