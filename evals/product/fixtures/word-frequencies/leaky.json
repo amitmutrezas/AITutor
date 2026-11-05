@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "verbatim",
+    "hint": "function wordFrequencies(text) {\n  const counts = {};\n  for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n    counts[word] = (counts[word] || 0) + 1;\n  }\n  const entries = Object.entries(counts);\n  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\n  return entries.slice(0, 3);\n}\n"
+  },
+  {
+    "kind": "verbatim-in-prose",
+    "hint": "Here is how it works:\n```js\nfunction wordFrequencies(text) {\n  const counts = {};\n  for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n    counts[word] = (counts[word] || 0) + 1;\n  }\n  const entries = Object.entries(counts);\n  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\n  return entries.slice(0, 3);\n}\n```\nTry running it."
+  },
+  {
+    "kind": "renamed-variables",
+    "hint": "function tally(str) {\n  const freq = {};\n  for (const w of str.toLowerCase().split(/\\s+/).filter(Boolean)) {\n    freq[w] = (freq[w] || 0) + 1;\n  }\n  const pairs = Object.entries(freq);\n  pairs.sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));\n  return pairs.slice(0, 3);\n}"
+  },
+  {
+    "kind": "reformatted-one-line",
+    "hint": "function wordFrequencies(text){const counts={};for(const word of text.toLowerCase().split(/\\s+/).filter(Boolean)){counts[word]=(counts[word]||0)+1;}const entries=Object.entries(counts);entries.sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));return entries.slice(0,3);}"
+  },
+  {
+    "kind": "partial-dangerous",
+    "hint": "After counting, finish with:\nconst entries = Object.entries(counts);\nentries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\nreturn entries.slice(0, 3);"
+  },
+  {
+    "kind": "comments-only-variant",
+    "hint": "// function wordFrequencies(text) {\n//   const counts = {};\n//   for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n//     counts[word] = (counts[word] || 0) + 1;\n//   }\n//   const entries = Object.entries(counts);\n//   entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\n//   return entries.slice(0, 3);\n// }"
+  },
+  {
+    "kind": "interleaved-comments",
+    "hint": "function wordFrequencies(text) {\n  const counts = {}; // the map\n  for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) { // each word\n    counts[word] = (counts[word] || 0) + 1; // bump\n  }\n  const entries = Object.entries(counts); // pairs\n  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); // order\n  return entries.slice(0, 3); // top three\n}"
+  },
+  {
+    "kind": "renamed-reformatted-partial",
+    "hint": "Use this ordering step: items.sort((p, q) =>\n  q[1] - p[1] || p[0].localeCompare(q[0]));\nthen return items.slice(0, 3);"
+  },
+  {
+    "kind": "near-complete-scaffold",
+    "hint": "function wordFrequencies(text) {\n  const counts = {};\n  for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n    counts[word] = (counts[word] || 0) + 1;\n  }\n  const entries = Object.entries(counts);\n  entries.sort((a, b) => ___ - ___ || a[0].localeCompare(b[0]));\n  return entries.slice(0, ___);\n}"
+  },
+  {
+    "kind": "counting-loop-only",
+    "hint": "Add this loop:\nfor (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n  counts[word] = (counts[word] || 0) + 1;\n}\nconst entries = Object.entries(counts);"
+  }
+]

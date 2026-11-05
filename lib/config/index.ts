@@ -18,6 +18,22 @@ export const LEAK_CHECK = {
   maxOverlapRatio: 0.5,
   /** PLACEHOLDER: min consecutive identical lines treated as a leak. */
   maxSharedLines: 2,
+  /** Token n-gram size for the similarity measure. */
+  ngramSize: 4,
+  /** Solution lines with fewer normalized tokens than this are ignored by the contiguous-lines check. */
+  minLineTokens: 3,
+} as const;
+
+/** Hint service limits (H5 timeout, H7 cache TTL, rate limit, input caps). */
+export const HINTS = {
+  /** Word cap for levels 1-4 (Reveal exempt). */
+  wordCap: 120,
+  modelTimeoutMs: 15_000,
+  cacheTtlMs: 60_000,
+  cacheMaxEntries: 500,
+  maxOutputTokens: 700,
+  maxCodeChars: 20_000,
+  rateLimit: { maxRequests: 20, windowMs: 60_000 },
 } as const;
 
 /** PLACEHOLDER plans: prices and credits are not decided (PLAN.md decision 1). */
