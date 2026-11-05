@@ -11,8 +11,9 @@ export function HintLadderStub() {
           <li key={name} className="rung">
             <button
               type="button"
-              disabled
-              style={{ all: "unset", flex: 1, cursor: "not-allowed" }}
+              aria-disabled="true"
+              onClick={(e) => e.preventDefault()}
+              style={{ all: "unset", flex: 1, cursor: "not-allowed", outline: "revert" }}
               aria-label={`Level ${i + 1}, ${name}, ${CREDIT_COST_BY_LEVEL[i]} credits, not available yet`}
             >
               {i + 1}. {name}

@@ -5,13 +5,15 @@ import { TEST_API_SOURCE } from "./testApi";
  * evaluated in Vitest with a fake `self`. Network and import APIs are shadowed BEFORE any
  * learner code is evaluated. A Worker has no host DOM by construction.
  *
- * Message in:  { code: string, tests: string }
- * Message out: { type: "done", results } | { type: "error", message }
+ * Message in:  { code: string, tests: string, nonce: string }
+ * Message out: { type: "done", nonce, results } | { type: "error", nonce, message }
  */
 export const WORKER_SOURCE = `
 ${TEST_API_SOURCE}
 (function (scope) {
-  var blocked = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts",
+  // Captured before any learner code exists. Learner code cannot reach this closure.
+  var post = scope.postMessage.bind(scope);
+  var blocked = ["postMessage", "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts",
     "WebTransport", "BroadcastChannel", "indexedDB", "caches", "Worker", "SharedWorker"];
   var stubs = blocked.map(function (name) {
     var stub = function () { throw new Error(name + " is disabled in the exercise sandbox"); };
@@ -22,6 +24,9 @@ ${TEST_API_SOURCE}
   });
   scope.onmessage = async function (ev) {
     var data = ev.data || {};
+    // Per-run secret from the host. Replies without it are ignored, so a forged "done"
+    // message posted by learner code is dropped.
+    var nonce = String(data.nonce);
     try {
       var api = makeTestApi();
       var body = String(data.code) + "\\n;\\n" + String(data.tests);
@@ -30,9 +35,9 @@ ${TEST_API_SOURCE}
       var fn = Function.apply(null, ["test", "assert"].concat(blocked, [body]));
       fn.apply(null, [api.test, api.assert].concat(stubs));
       var results = await api.run();
-      scope.postMessage({ type: "done", results: results });
+      post({ type: "done", nonce: nonce, results: results });
     } catch (e) {
-      scope.postMessage({ type: "error", message: e && e.message ? String(e.message) : String(e) });
+      post({ type: "error", nonce: nonce, message: e && e.message ? String(e.message) : String(e) });
     }
   };
 })(self);

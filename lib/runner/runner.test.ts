@@ -18,7 +18,7 @@ function bootWorker() {
   new Function("self", WORKER_SOURCE)(scope);
   const send = async (code: string, tests: string): Promise<Posted> => {
     posted.length = 0;
-    await scope.onmessage!({ data: { code, tests } });
+    await scope.onmessage!({ data: { code, tests, nonce: "n1" } });
     return posted[0] as Posted;
   };
   return { scope, send };
@@ -54,8 +54,9 @@ describe("R1: sandbox", () => {
   it("R1: a worker reply beats the default 2s timer and the worker is terminated", async () => {
     const terminate = vi.fn();
     const w: WorkerLike = {
-      postMessage() {
-        w.onmessage?.({ data: { type: "done", results: [{ name: "a", passed: true }] } });
+      postMessage(m) {
+        const nonce = (m as { nonce: string }).nonce;
+        w.onmessage?.({ data: { type: "done", nonce, results: [{ name: "a", passed: true }] } });
       },
       terminate,
       onmessage: null,
@@ -64,6 +65,37 @@ describe("R1: sandbox", () => {
     const out = await runInSandbox("", "", { factory: () => w });
     expect(out.status).toBe("ok");
     expect(terminate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("R1: forged results", () => {
+  it("R1: learner code cannot call postMessage to forge a result", async () => {
+    const { send } = bootWorker();
+    const msg = await send(
+      "function f() { postMessage({ type: 'done', results: [{ name: 'x', passed: true }] }); }",
+      "test('forge', () => { f(); });",
+    );
+    expect(msg.type).toBe("done");
+    expect(msg.results![0].passed).toBe(false);
+    expect(msg.results![0].message).toMatch(/disabled/);
+  });
+
+  it("R1: a message without the run nonce is ignored and the real result still wins", async () => {
+    const terminate = vi.fn();
+    const w: WorkerLike = {
+      postMessage(m) {
+        const nonce = (m as { nonce: string }).nonce;
+        w.onmessage?.({ data: { type: "done", results: [{ name: "fake", passed: true }] } });
+        w.onmessage?.({ data: { type: "done", nonce: "wrong", results: [{ name: "fake", passed: true }] } });
+        w.onmessage?.({ data: { type: "done", nonce, results: [{ name: "real", passed: false }] } });
+      },
+      terminate,
+      onmessage: null,
+      onerror: null,
+    };
+    const out = await runInSandbox("", "", { factory: () => w });
+    expect(out.results.map((r) => r.name)).toEqual(["real"]);
+    expect(allPassed(out)).toBe(false);
   });
 });
 

