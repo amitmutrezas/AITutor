@@ -1,6 +1,6 @@
 # Plan: Unstuck MVP (from intent/INTENT.md and intent/SPEC.md, 2026-11-05)
 
-Status: **DRAFT. Not approved. No implementation starts until Amit approves this file in the project thread.**
+Status: **APPROVED** by Amit in the project thread on 2026-11-05 (message cmsg_012mWifshaJmd4UHBhbA6rZpNfn2itpTTrmgRf53Cu5xL2). Open decisions below use their stated defaults.
 If implementation departs from this plan, update this file in the same commit.
 After approval: the line becomes `Status: APPROVED`. An agent may make that edit only in response to Amit's explicit approval message in the project thread, quoting the message in the commit, and only with `ALLOW_PROTECTED=1` set for that one edit (hooks block it otherwise). The change must be on `main` before build sessions begin; CI reads the status from the base branch.
 
