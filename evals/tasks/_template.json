@@ -1,0 +1,12 @@
+{
+  "name": "template-do-not-run",
+  "source": "Merged PR or incident this eval comes from",
+  "from": "<last commit before the PR>",
+  "prompt": "The request the engineer gave Claude. Run the tests before you finish.",
+  "may_change": ["lib", "tests"],
+  "checks": [
+    { "name": "tests pass", "run": "pnpm test" },
+    { "name": "lint clean", "run": "pnpm lint" },
+    { "name": "no line removed from existing tests", "run": "! git diff HEAD -- tests | grep '^-[^-]'" }
+  ]
+}

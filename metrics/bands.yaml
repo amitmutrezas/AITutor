@@ -1,0 +1,23 @@
+# Statistical bands for the maintain stage. Inactive until 30 days of baseline exist.
+metrics:
+  - metric: ci_test_failure_rate
+    baseline: rolling_30d
+    rules: western_electric
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: "Read,Grep" }
+      3sigma: { action: propose, routes: [pull_request, "runbook:rollback-deploy"] }
+  - metric: hint_fallback_rate
+    baseline: rolling_30d
+    rules: western_electric
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: "Read,Grep" }
+      3sigma: { action: propose, routes: [pull_request, "runbook:review-leak-check-threshold"] }
+  - metric: ai_cost_per_active_learner
+    baseline: rolling_30d
+    rules: western_electric
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose }
+      3sigma: { action: propose, routes: [pull_request] }

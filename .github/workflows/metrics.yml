@@ -1,0 +1,19 @@
+name: Weekly metrics
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect PR metrics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: metrics/collect.sh | tee -a "$GITHUB_STEP_SUMMARY"
