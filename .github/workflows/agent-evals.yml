@@ -16,23 +16,41 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # task evals start from older commits
       - name: Skip without key
         id: key
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then echo "ANTHROPIC_API_KEY secret not set. Agent evals skipped."; echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - if: steps.key.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
-      - name: Run eval suite
+      - name: Policy evals (does CLAUDE.md still steer Claude?)
         if: steps.key.outputs.run == 'true'
         run: |
-          pass=0; total=0
+          failed=0
           for eval in evals/agent/*.json; do
-            total=$((total+1))
-            claude -p "$(jq -r '.prompt' "$eval")" \
-              --allowedTools "Read,Grep,Glob" \
-              --output-format json > result.json
-            if ./evals/check.sh "$eval" result.json; then pass=$((pass+1)); fi
+            claude -p "$(jq -r '.prompt' "$eval")" --allowedTools "Read,Grep,Glob" --output-format json > result.json
+            ./evals/check.sh "$eval" result.json || failed=$((failed+1))
           done
-          echo "Agent evals: $pass/$total passed" | tee -a "$GITHUB_STEP_SUMMARY"
-          # Gate: all permanent evals must pass.
-          [ "$pass" = "$total" ]
+          echo "Policy evals failed: $failed" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$failed" -eq 0 ]
+      - name: Task evals (run from an older commit under the current configuration)
+        if: steps.key.outputs.run == 'true'
+        run: |
+          shopt -s nullglob
+          git config --global user.name evals && git config --global user.email evals@example.com
+          cp -r evals /tmp/evals   # grade from a copy made before any run
+          failed=0; n=0
+          for eval in /tmp/evals/tasks/[!_]*.json; do
+            n=$((n+1))
+            git worktree add -q --detach /tmp/run "$(jq -r '.from' "$eval")"
+            rm -rf /tmp/run/evals /tmp/run/.claude
+            cp -r CLAUDE.md .claude /tmp/run/   # the configuration under test
+            git -C /tmp/run add -A && git -C /tmp/run commit -q --allow-empty -m "configuration under test"
+            ( cd /tmp/run
+              claude -p "$(jq -r '.prompt' "$eval")" --allowedTools "Read,Edit,Bash(pnpm test),Bash(pnpm lint)" --output-format json > /tmp/result.json
+              /tmp/evals/check-task.sh "$eval" /tmp/result.json ) || failed=$((failed+1))
+            git worktree remove --force /tmp/run
+          done
+          echo "Task evals: $n run, $failed failed (none yet before milestone M0)" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$failed" -eq 0 ]

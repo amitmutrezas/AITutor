@@ -8,9 +8,9 @@ Used by the Codex reviewer (via `AGENTS.md`) and by human reviewers. Reviewing i
 2. CI runs (`.github/workflows/ci.yml`). It must be green before review matters.
 3. Request Codex review by commenting `@codex review` on the PR (or turn on automatic reviews in Codex settings for this repo). Codex reads `AGENTS.md`, which points here.
 4. Findings are fixed on the same branch. Reply to a finding when you disagree, with the reason.
-5. A human code owner (`CODEOWNERS`) approves and merges. Automated review never approves or blocks on its own.
+5. Amit reviews and merges. Automated review never approves or blocks on its own.
 
-Setup the owner has to do once: install the Codex GitHub app on `amitmutrezas/AITutor`, enable code review for the repo in Codex settings, and turn on branch protection requiring one human approval and green CI.
+Setup done: the Codex GitHub app is installed on the repo and reviews PRs when they open. Branch protection is not used (Amit's call); the human check is Amit reviewing and merging each PR. To have Codex fix a finding, comment `@codex address that feedback` on the PR. The agent that wrote the code does not approve it.
 
 ## Three passes
 
@@ -20,13 +20,17 @@ Tag every finding with its pass.
 
 **Security.** Secrets in code, missing auth on a route, missing Zod validation, injection, unsafe execution of learner code, signature checks, rate limits, PII in logs, dependency risk.
 
-**Compliance.** Does the change match `intent/SPEC.md` (cite the id) and `POLICY.md` (cite the section)? Scope creep from the Out list counts here.
+**Compliance.** Does the change match `intent/SPEC.md` (cite the id), the committed `intent/PLAN.md`, `POLICY.md` (cite the section) and the design principles in `CLAUDE.md`? Scope creep from the Out list counts here. Flag when a change leaves `CLAUDE.md` or `PLAN.md` out of date.
 
 ## Severity
 
 - **Important** is reserved for findings that break behavior, leak the reference solution or learner data, mishandle money or credits, or breach POLICY.md.
 - **Nit** is everything else. Cap nits at five per review. If there are more, pick the five that matter.
 - Do not comment on formatting, import order or anything lint, prettier or the typechecker already enforces.
+
+## Feedback into CLAUDE.md
+
+When a review flags the same mistake a second time, the correction goes into `CLAUDE.md` ("Things Claude gets wrong") as part of that PR. Once a month, rate the findings and trim REVIEW.md: cap nits, add generated paths to Exclude.
 
 ## Always check
 

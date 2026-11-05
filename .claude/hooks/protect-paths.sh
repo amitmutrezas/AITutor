@@ -24,6 +24,12 @@ if printf '%s' "$rel" | grep -Eq "$protected" && [ "${ALLOW_PROTECTED:-}" != "1"
   exit 2
 fi
 
+# Fix tasks: the agent may not weaken the check on the code it is fixing.
+if [ "${FIX_TASK:-}" = "1" ] && printf '%s' "$rel" | grep -Eq '(^|/)(tests?|e2e|__tests__)/|\.(test|spec)\.[jt]sx?$'; then
+  echo "Blocked: FIX_TASK=1, so test files are read-only. Fix the code, not the test (CLAUDE.md)." >&2
+  exit 2
+fi
+
 # Only a human flips PLAN.md to APPROVED.
 if [ "$rel" = "intent/PLAN.md" ] && [ "${ALLOW_PROTECTED:-}" != "1" ]; then
   newtext="$(printf '%s' "$input" | jq -r '[.tool_input.new_string, .tool_input.content, (.tool_input.edits // [] | map(.new_string) | join("\n"))] | map(select(. != null)) | join("\n")')"

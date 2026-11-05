@@ -28,6 +28,7 @@ The belief being tested: career switchers will pay for a tutor that teaches inst
 - Credits are counted and enforced by the app, never by the model.
 - Open source from day one. No secrets, keys or learner data in the repo.
 - Production on Vercel with live Razorpay keys. Money, secrets and production deploys need Amit's explicit approval.
+- Exercise language: JavaScript first (Amit, 2026-11-05). TypeScript exercises are added after launch. The app itself is Next.js + TypeScript.
 
 ## Success
 

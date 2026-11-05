@@ -37,6 +37,10 @@ expect 0 $H/bash-paths.sh '{"tool_input":{"command":"node -p process.env.HOME"}}
 expect 2 $H/bash-paths.sh '{"tool_input":{"command":"sed -i s/DRAFT/APPROVED/ intent/PLAN.md"}}'
 expect 2 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/intent/PLAN.md\",\"new_string\":\"Status: APPROVED\"}}"
 expect 0 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/intent/PLAN.md\",\"new_string\":\"M0 done\"}}"
+(FIX_TASK=1 expect 2 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/lib/hints/leak.test.ts\"}}")
+expect 2 $H/release-gate.sh '{"tool_name":"mcp__Vercel__request_promote","tool_input":{}}'
+expect 0 $H/release-gate.sh '{"tool_name":"mcp__Vercel__get_deployment","tool_input":{}}'
+(RELEASE_APPROVAL=amit expect 0 $H/release-gate.sh '{"tool_name":"mcp__Vercel__request_promote","tool_input":{}}')
 expect 0 $H/secrets-guard.sh '{"tool_input":{"command":"git status"}}'
 # secrets-guard: .env co-staged with .env.example must still block
 tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && echo A=1 > .env && echo A= > .env.example && git add -f .env .env.example \

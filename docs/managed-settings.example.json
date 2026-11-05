@@ -1,0 +1,19 @@
+{
+  "_comment": "Starting point from the AI-native SDLC playbook. Deploy through MDM or the admin console on machines that run agents; project settings cannot enforce these. Tailor before use. Not active in this repo.",
+  "permissions": {
+    "deny": ["Read(./.env)", "Read(./.env.local)", "Read(./.env.production)", "Read(./secrets/**)", "Bash(curl *)", "Bash(wget *)"],
+    "allow": ["Bash(git *)", "Bash(pnpm test)", "Bash(pnpm lint)", "Bash(pnpm typecheck)", "Bash(pnpm build)"],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": { "allowedDomains": ["github.com", "registry.npmjs.org", "api.anthropic.com"] },
+    "credentials": {
+      "files": [{ "path": "~/.ssh", "mode": "deny" }, { "path": "~/.aws/credentials", "mode": "deny" }],
+      "envVars": [{ "name": "GITHUB_TOKEN", "mode": "deny" }]
+    }
+  }
+}

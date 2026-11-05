@@ -17,7 +17,13 @@ Hint-ladder tutor for adult career switchers. Next.js + TypeScript on Vercel. In
 - Verify exercises: `pnpm exercises:verify`
 - Product evals: `pnpm evals:product`
 
-Before reporting done, run typecheck, lint, test and build, and paste the output. If a test fails, fix the code, not the test. Never skip or delete a failing test.
+## Verifying your work
+
+- Build: `pnpm build` (must finish with a successful build)
+- Test: `pnpm test` (all green; never skip or delete a failing test)
+- Lint: `pnpm lint` (zero warnings)
+
+Run all three before reporting any task complete, and paste the output. If a test fails, fix the code, not the test. For a bug fix, write the failing test first, run it, commit it, then fix the code without editing that test (set `FIX_TASK=1` and a hook blocks edits to test files).
 
 ## Conventions
 
@@ -47,9 +53,9 @@ Before reporting done, run typecheck, lint, test and build, and paste the output
 
 ## Workflow
 
-- Plan first (plan mode) for anything touching more than three files. Commit approved plan changes to `intent/PLAN.md`.
+- Plan first (plan mode) for anything touching more than three files. When the work departs from `intent/PLAN.md`, update it in the same commit.
 - One worktree per parallel session: `claude --worktree <name>`. Branch names `claude/<milestone>-<slug>`.
 - Run the `verifier` subagent (`.claude/agents/verifier.md`) before saying a UI change works.
-- PR review is done by the Codex agent, not Claude. See `REVIEW.md`. Do not set up Claude review workflows.
+- PR review is done by the Codex agent (`@codex review`), not Claude, and Amit merges. See `REVIEW.md`. Do not set up Claude review workflows. A review finding repeated twice becomes a line in "Things Claude gets wrong".
 - Skills: `hint-ladder` (hint code), `exercise-authoring` (exercise content), `secure-endpoint` (any API route).
 - When you make the same mistake twice, add a line to "Things Claude gets wrong".

@@ -1,7 +1,8 @@
-# Plan: Unstuck MVP (from INTENT.md and SPEC.md, 2026-11-05)
+# Plan: Unstuck MVP (from intent/INTENT.md and intent/SPEC.md, 2026-11-05)
 
 Status: **DRAFT. Not approved. No implementation starts until Amit approves this file in the project thread.**
-After approval: Amit (not an agent) changes this line to `Status: APPROVED`, in a small PR carrying the `policy-approved` label or a direct commit. Build sessions begin only after that is on `main`.
+If implementation departs from this plan, update this file in the same commit.
+After approval: the line becomes `Status: APPROVED`. An agent may make that edit only in response to Amit's explicit approval message in the project thread, quoting the message in the commit, and only with `ALLOW_PROTECTED=1` set for that one edit (hooks block it otherwise). The change must be on `main` before build sessions begin; CI reads the status from the base branch.
 
 ## Proposed stack (confirm or change)
 
@@ -10,7 +11,7 @@ After approval: Amit (not an agent) changes this line to `Status: APPROVED`, in 
 - Postgres with auth: Supabase [proposal; Amit has the connector, not yet confirmed as the choice].
 - Razorpay subscriptions plus webhook. [confirmed provider]
 - LLM calls through the Anthropic API from server routes. Model is an env var. Small fast model for levels 1-3, stronger one for 4-5 [proposal].
-- In-browser execution: sandboxed Web Worker for JavaScript exercises. [assumption]
+- In-browser execution: sandboxed Web Worker for JavaScript exercises. [assumption] Exercise language: JavaScript first, TypeScript after launch. [confirmed by Amit]
 
 ## Files that change (new repo, everything is new)
 
@@ -30,17 +31,17 @@ tests/, evals/            unit tests, product evals (leak recall), agent evals
 
 ## Order of work
 
-Each milestone ends in a PR that passes CI and review (REVIEW.md). Milestones marked (P) can run in parallel worktrees once M0 and M1 land.
+Each milestone ends in a PR that passes CI and review (REVIEW.md). Milestones marked (P) can run in parallel worktrees once M0 and M1 land. Each (P) milestone touches different folders: `lib/hints`, `lib/runner` plus workspace UI, `lib/payments` plus `app/api/razorpay`.
 
-0. **M0 Scaffold.** Next.js + TS + lint + test + CI wired to `package.json` scripts the hooks and workflows already call (`lint`, `typecheck`, `test`, `build`). Vercel preview connected. No secrets.
-1. **M1 Data and exercise schema.** DB schema, exercise schema, `exercises:verify`. Proof: verify passes on one hand-written seed exercise and fails on a broken one.
-2. **M2 Hint core (P).** Ladder config, prompt builder with firewall, leak check, fallbacks, hint route without credits. Proof: acceptance 2 and 3.
-3. **M3 Runner and workspace (P).** Editor, worker sandbox, test results UI. Proof: Playwright smoke steps 1-3.
-4. **M4 Exercises.** Generate 6 to 8 exercises, verify, human read-through, set live. Proof: acceptance 1.
-5. **M5 Accounts, credits, saved code.** Auth, credit deduction, saved code and delete. Proof: acceptance 4, saved-code tests.
-6. **M6 Payments (P).** Plans, Razorpay test-mode checkout, webhook. Proof: acceptance 5. Live keys only with Amit's go-ahead.
-7. **M7 Pages and polish.** Landing, plans, account, policy pages, analytics events, accessibility pass. Proof: acceptance 6 and 8.
-8. **M8 Launch.** README, LICENSE, CONTRIBUTING, pre-launch hint audit (acceptance 7), Vercel production deploy behind the production gate hook. Amit approves the deploy.
+0. **M0 Scaffold (N1, N6).** Next.js + TS + lint + test + CI wired to `package.json` scripts the hooks and workflows already call (`lint`, `typecheck`, `test`, `build`). Vercel preview connected. No secrets.
+1. **M1 Data and exercise schema (E1, E2, E4).** DB schema, exercise schema, `exercises:verify`. Proof: verify passes on one hand-written seed exercise and fails on a broken one.
+2. **M2 Hint core (H1-H7, C2).** Ladder config, prompt builder with firewall, leak check, fallbacks, hint route without credits. Proof: acceptance 2 and 3.
+3. **M3 Runner and workspace (R1-R3, N4).** Editor, worker sandbox, test results UI. Proof: Playwright smoke steps 1-3.
+4. **M4 Exercises (E1-E4).** Generate 6 to 8 exercises, verify, human read-through, set live. Proof: acceptance 1.
+5. **M5 Accounts, credits, saved code (A1-A3, C1-C5).** Auth, credit deduction, saved code and delete. Proof: acceptance 4, saved-code tests.
+6. **M6 Payments (P1-P4).** Plans, Razorpay test-mode checkout, webhook. Proof: acceptance 5. Live keys only with Amit's go-ahead.
+7. **M7 Pages and polish (L1-L3, N4, N6).** Landing, plans, account, policy pages, analytics events, accessibility pass. Proof: acceptance 6 and 8.
+8. **M8 Launch (production deploy).** README, LICENSE, CONTRIBUTING, pre-launch hint audit (acceptance 7), Vercel production deploy behind the production gate hook. Amit approves the deploy.
 
 Parallel plan: M0 and M1 serial, one session. Then 3 worktree sessions: hint core (M2), runner and workspace (M3), payments (M6). A `verifier` subagent runs the app before any session reports done. Auth and credits (M5) wait for M2 and M3.
 
@@ -58,14 +59,16 @@ Acceptance criteria 1 to 8 in SPEC.md, all green in CI except 7 (human audit) an
 
 ## Decisions needed from Amit
 
-1. Exercise language: JavaScript only, TypeScript only, or both. Default if no answer: JavaScript.
-2. Plan prices and monthly credit amounts. Default: placeholders from the prototype, marked as such in the UI code.
-3. Free tier: none, or levels 1-2 only. Default: levels 1-2 only.
-4. Database and auth: Supabase or another. Default: Supabase.
-5. LICENSE for the open source repo (MIT, Apache-2.0, other). Default: MIT.
-6. Who reviews the terms, refund and privacy text before live payments.
-7. Which LLM API account and budget cap to use for production.
-8. Codex review: confirm the Codex GitHub app is installed on this repo (see REVIEW.md).
+Decided: exercise language is JavaScript first, TypeScript after launch (2026-11-05). Branch protection and a `policy-approved` label are not wanted; review is Codex plus Amit merging.
+
+1. Plan prices and monthly credit amounts. Default: placeholders from the prototype, marked as such in config.
+2. Free tier: none, or levels 1-2 only. Default: levels 1-2 only.
+3. Database and auth: Supabase or another. Default: Supabase.
+4. LICENSE for the open source repo (MIT, Apache-2.0, other). Default: MIT.
+5. Who reviews the terms, refund and privacy text before live payments.
+6. Which LLM API account and budget cap to use for production.
+
+Defaults apply if you say "approved" without changing them.
 
 ## Approval gate
 

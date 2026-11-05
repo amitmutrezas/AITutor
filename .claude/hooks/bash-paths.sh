@@ -2,7 +2,7 @@
 # PreToolUse gate for Bash. Best-effort guard: blocks shell commands that look like they WRITE to
 # protected paths (POLICY.md section 6) or to application code before PLAN.md is approved.
 # This is a heuristic and can be bypassed by determined indirection. The real backstop is the
-# `protected-paths` CI job plus CODEOWNERS and branch protection.
+# `protected-paths` CI job and Amit reviewing every PR.
 set -euo pipefail
 root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cmd="$(jq -r '.tool_input.command // empty')"
