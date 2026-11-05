@@ -1,0 +1,23 @@
+:root {
+  --green: #0b6b3a;
+  --green-light: #e8f5ec;
+  --text: #1c2a22;
+}
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: var(--text);
+  background: var(--green-light);
+  line-height: 1.6;
+}
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+}
+h1 {
+  color: var(--green);
+}
+a {
+  color: var(--green);
+}
