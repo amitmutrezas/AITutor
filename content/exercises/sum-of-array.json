@@ -1,0 +1,17 @@
+{
+  "id": "sum-of-array",
+  "title": "Sum of an array",
+  "statement": "Write a function `sumOfArray(numbers)` that returns the sum of all numbers in the array. An empty array should return 0.",
+  "language": "javascript",
+  "starterCode": "function sumOfArray(numbers) {\n  // your code here\n}\n",
+  "tests": "test('adds up several numbers', () => { assert.equal(sumOfArray([1, 2, 3]), 6); });\ntest('handles negative numbers', () => { assert.equal(sumOfArray([-1, 5, -4]), 0); });\ntest('empty array gives 0', () => { assert.equal(sumOfArray([]), 0); });\n",
+  "referenceSolution": "function sumOfArray(numbers) {\n  let total = 0;\n  for (const n of numbers) {\n    total += n;\n  }\n  return total;\n}\n",
+  "fallbackHints": [
+    "Think about what you need to remember while you look at each number one at a time.",
+    "A loop visits every item in an array. You need a variable that keeps a running total as you go.",
+    "Look at what your function returns right now. What should the running total start as for an empty array?",
+    "Create a total that starts at zero, loop over the array, add each item to the total, then return the total after the loop.",
+    "Use `let total = 0;`, then `for (const n of numbers) { total += n; }`, and finally `return total;`."
+  ],
+  "status": "verified"
+}
