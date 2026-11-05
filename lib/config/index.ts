@@ -30,6 +30,7 @@ export const HINTS = {
   wordCap: 120,
   modelTimeoutMs: 15_000,
   cacheTtlMs: 60_000,
+  cacheMaxEntries: 500,
   maxOutputTokens: 700,
   maxCodeChars: 20_000,
   rateLimit: { maxRequests: 20, windowMs: 60_000 },

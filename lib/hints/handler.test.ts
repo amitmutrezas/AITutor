@@ -1,15 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   createHintHandler,
   createRateLimiter,
   headerAuth,
   noopCredits,
-  type CreditsPort,
   type HandlerDeps,
 } from "./handler";
 import { createInMemoryExerciseStore, type LoadExercise } from "./exercise-store";
 import { TtlCache } from "./service";
-import { exercise, fakeModel, goodText } from "./test-fixtures";
+import { exercise, fakeModel, goodText, inMemoryCredits } from "./test-fixtures";
 
 function setup(over: Partial<HandlerDeps> = {}) {
   const model = fakeModel(() => ({ text: goodText, tokensIn: 1, tokensOut: 2 }));
@@ -89,30 +88,53 @@ describe("POST /api/hint", () => {
   });
 
   it("C2: insufficient credits refuses before any model call", async () => {
-    const credits: CreditsPort = { canAfford: async () => false, charge: vi.fn() };
+    const credits = inMemoryCredits({ u1: 0 });
     const { post, model } = setup({ credits });
     const res = await post(req({ ...valid, level: 3 }));
     expect(res.status).toBe(402);
     expect(model.calls).toBe(0);
   });
 
-  it("C2/H5: charges the level cost only for real hints, not fallbacks", async () => {
-    const charge = vi.fn(async () => undefined);
-    const credits: CreditsPort = { canAfford: async () => true, charge };
-    const ok = setup({ credits });
-    const res = await ok.post(req({ ...valid, level: 3 }));
-    expect((await res.json()).charged).toBe(true);
-    expect(charge).toHaveBeenCalledWith("u1", 1, { exerciseId: exercise.id, level: 3 });
+  it("C2: balance for one hint, two concurrent paid requests: one model call, one 402", async () => {
+    const credits = inMemoryCredits({ u1: 1 });
+    const { post, model } = setup({ credits });
+    const [a, b] = await Promise.all([
+      post(req({ ...valid, level: 3, code: "a" })),
+      post(req({ ...valid, level: 3, code: "b" })),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 402]);
+    expect(model.calls).toBe(1);
+    expect(credits.balances.u1).toBe(0);
+  });
 
-    charge.mockClear();
-    const failing = setup({
+  it("C2: a successful paid hint keeps the reservation", async () => {
+    const credits = inMemoryCredits({ u1: 5 });
+    const { post } = setup({ credits });
+    const res = await post(req({ ...valid, level: 3 }));
+    expect(await res.json()).toMatchObject({ charged: true, cost: 1 });
+    expect(credits.balances.u1).toBe(4);
+  });
+
+  it("C2/H5: a failed hint releases the reservation", async () => {
+    const credits = inMemoryCredits({ u1: 5 });
+    const { post } = setup({
       credits,
       model: fakeModel(() => {
         throw new Error("down");
       }),
     });
-    const res2 = await failing.post(req({ ...valid, level: 3 }));
-    expect(await res2.json()).toMatchObject({ fallback: true, charged: false });
-    expect(charge).not.toHaveBeenCalled();
+    const res = await post(req({ ...valid, level: 3 }));
+    expect(await res.json()).toMatchObject({ fallback: true, charged: false });
+    expect(credits.balances.u1).toBe(5);
+  });
+
+  it("C2/H7: a free cache hit releases the reservation", async () => {
+    const credits = inMemoryCredits({ u1: 5 });
+    const { post, model } = setup({ credits });
+    await post(req({ ...valid, level: 3 }));
+    const second = await post(req({ ...valid, level: 3 }));
+    expect(await second.json()).toMatchObject({ cached: true, charged: false });
+    expect(model.calls).toBe(1);
+    expect(credits.balances.u1).toBe(4);
   });
 });

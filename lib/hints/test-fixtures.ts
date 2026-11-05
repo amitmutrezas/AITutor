@@ -40,4 +40,24 @@ export function fakeModel(
   return m;
 }
 
-export const goodText = "Think about which numbers should be added: how can you tell if a number is even?";
+export const goodText =
+  "Think about which numbers should be added: how can you tell if a number is even?";
+
+/** In-memory CreditsPort modelling atomicity: check-and-decrement happens in one synchronous step. */
+export function inMemoryCredits(balances: Record<string, number>) {
+  return {
+    balances,
+    reserved: 0,
+    released: 0,
+    async reserve(userId: string, cost: number) {
+      if ((this.balances[userId] ?? 0) < cost) return false;
+      this.balances[userId] -= cost;
+      this.reserved += cost;
+      return true;
+    },
+    async release(userId: string, cost: number) {
+      this.balances[userId] = (this.balances[userId] ?? 0) + cost;
+      this.released += cost;
+    },
+  };
+}

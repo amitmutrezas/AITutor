@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TtlCache, hashCode, requestHint, type HintLogEvent } from "./service";
-import { SECRET_MARKER, exercise, fakeModel, goodText, learnerCode, stripSolution } from "./test-fixtures";
+import {
+  SECRET_MARKER,
+  exercise,
+  fakeModel,
+  goodText,
+  learnerCode,
+  stripSolution,
+} from "./test-fixtures";
 
 const ex13 = stripSolution(exercise);
 const base = () => ({ cache: new TtlCache(), log: () => undefined });
@@ -10,7 +17,11 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("requestHint", () => {
   it("H5: leak trip returns the stored fallback, no charge", async () => {
-    const model = fakeModel(() => ({ text: exercise.referenceSolution, tokensIn: 5, tokensOut: 5 }));
+    const model = fakeModel(() => ({
+      text: exercise.referenceSolution,
+      tokensIn: 5,
+      tokensOut: 5,
+    }));
     const r = await requestHint(
       { level: 2, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
       base(),
@@ -22,8 +33,16 @@ describe("requestHint", () => {
     const model = fakeModel(() => {
       throw new Error("boom");
     });
-    const r = await requestHint({ level: 3, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref }, base());
-    expect(r).toMatchObject({ hint: "fb3", fallback: true, fallbackReason: "model-error", charge: false });
+    const r = await requestHint(
+      { level: 3, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
+      base(),
+    );
+    expect(r).toMatchObject({
+      hint: "fb3",
+      fallback: true,
+      fallbackReason: "model-error",
+      charge: false,
+    });
   });
 
   it("H5: timeout returns the fallback, no charge", async () => {
@@ -32,7 +51,12 @@ describe("requestHint", () => {
       { level: 1, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
       { ...base(), timeoutMs: 20 },
     );
-    expect(r).toMatchObject({ hint: "fb1", fallback: true, fallbackReason: "timeout", charge: false });
+    expect(r).toMatchObject({
+      hint: "fb1",
+      fallback: true,
+      fallbackReason: "timeout",
+      charge: false,
+    });
   });
 
   it("H5: missing reference for the leak check fails closed to the fallback", async () => {
@@ -43,18 +67,35 @@ describe("requestHint", () => {
 
   it("H4: levels 1-4 run the leak check, good hints pass and are charged", async () => {
     const model = fakeModel(() => ({ text: goodText, tokensIn: 10, tokensOut: 20 }));
-    const r = await requestHint({ level: 1, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref }, base());
-    expect(r).toMatchObject({ hint: goodText, fallback: false, charge: true, tokensIn: 10, tokensOut: 20 });
+    const r = await requestHint(
+      { level: 1, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
+      base(),
+    );
+    expect(r).toMatchObject({
+      hint: goodText,
+      fallback: false,
+      charge: true,
+      tokensIn: 10,
+      tokensOut: 20,
+    });
   });
 
   it("H4: level 4 uses the exercise's own solution for the check", async () => {
-    const model = fakeModel(() => ({ text: exercise.referenceSolution, tokensIn: 1, tokensOut: 1 }));
+    const model = fakeModel(() => ({
+      text: exercise.referenceSolution,
+      tokensIn: 1,
+      tokensOut: 1,
+    }));
     const r = await requestHint({ level: 4, exercise, learnerCode, model }, base());
     expect(r).toMatchObject({ hint: "fb4", fallback: true });
   });
 
   it("H6: Reveal skips the leak check and may show the solution", async () => {
-    const model = fakeModel(() => ({ text: exercise.referenceSolution, tokensIn: 1, tokensOut: 1 }));
+    const model = fakeModel(() => ({
+      text: exercise.referenceSolution,
+      tokensIn: 1,
+      tokensOut: 1,
+    }));
     const r = await requestHint({ level: 5, exercise, learnerCode, model }, base());
     expect(r).toMatchObject({ hint: exercise.referenceSolution, fallback: false, charge: true });
   });
@@ -62,7 +103,13 @@ describe("requestHint", () => {
   it("H7: same (exercise, level, code) is served from cache and not charged twice", async () => {
     const model = fakeModel(() => ({ text: goodText, tokensIn: 3, tokensOut: 4 }));
     const deps = base();
-    const args = { level: 2 as const, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref };
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
     const first = await requestHint(args, deps);
     const second = await requestHint(args, deps);
     expect(model.calls).toBe(1);
@@ -75,7 +122,13 @@ describe("requestHint", () => {
     let t = 0;
     const cache = new TtlCache(1000, () => t);
     const model = fakeModel(() => ({ text: goodText, tokensIn: 1, tokensOut: 1 }));
-    const args = { level: 2 as const, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref };
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
     await requestHint(args, { cache, log: () => undefined });
     t = 1001;
     await requestHint(args, { cache, log: () => undefined });
@@ -84,10 +137,18 @@ describe("requestHint", () => {
 
   it("H7: fallbacks are not cached", async () => {
     const model = fakeModel((n) =>
-      n === 1 ? { text: exercise.referenceSolution, tokensIn: 1, tokensOut: 1 } : { text: goodText, tokensIn: 1, tokensOut: 1 },
+      n === 1
+        ? { text: exercise.referenceSolution, tokensIn: 1, tokensOut: 1 }
+        : { text: goodText, tokensIn: 1, tokensOut: 1 },
     );
     const deps = base();
-    const args = { level: 2 as const, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref };
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
     expect((await requestHint(args, deps)).fallback).toBe(true);
     expect((await requestHint(args, deps)).fallback).toBe(false);
   });
@@ -96,10 +157,26 @@ describe("requestHint", () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
       vi.spyOn(console, m).mockImplementation(() => undefined),
     );
-    const model = fakeModel((n) => ({ text: n === 1 ? goodText : exercise.referenceSolution, tokensIn: 7, tokensOut: 9 }));
+    const model = fakeModel((n) => ({
+      text: n === 1 ? goodText : exercise.referenceSolution,
+      tokensIn: 7,
+      tokensOut: 9,
+    }));
     // default logger (console.info) on purpose
-    await requestHint({ level: 2, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref }, { cache: new TtlCache() });
-    await requestHint({ level: 2, exercise: ex13, learnerCode: learnerCode + "x", model, getReferenceForLeakCheck: ref }, { cache: new TtlCache() });
+    await requestHint(
+      { level: 2, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
+      { cache: new TtlCache() },
+    );
+    await requestHint(
+      {
+        level: 2,
+        exercise: ex13,
+        learnerCode: learnerCode + "x",
+        model,
+        getReferenceForLeakCheck: ref,
+      },
+      { cache: new TtlCache() },
+    );
     const out = spies.flatMap((s) => s.mock.calls.flat()).join("\n");
     expect(out).toContain(hashCode(learnerCode));
     expect(out).toContain('"tokensIn":7');
@@ -116,5 +193,82 @@ describe("requestHint", () => {
     );
     expect(JSON.stringify(events)).not.toContain("LEARNER_SECRET_CODE");
     expect(events[0].codeHash).toBe(hashCode(learnerCode));
+  });
+
+  it("N2: a leak-rejected fallback keeps the real token counts", async () => {
+    const model = fakeModel(() => ({
+      text: exercise.referenceSolution,
+      tokensIn: 11,
+      tokensOut: 13,
+    }));
+    const r = await requestHint(
+      { level: 2, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
+      base(),
+    );
+    expect(r).toMatchObject({ fallback: true, tokensIn: 11, tokensOut: 13 });
+    const noRef = await requestHint(
+      { level: 2, exercise: ex13, learnerCode: "other", model },
+      base(),
+    );
+    expect(noRef).toMatchObject({ fallback: true, tokensIn: 11, tokensOut: 13 });
+  });
+
+  it("H7: concurrent identical requests make one model call and only one is chargeable", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const model = fakeModel(async () => {
+      await gate;
+      return { text: goodText, tokensIn: 1, tokensOut: 1 };
+    });
+    const deps = base();
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
+    const p1 = requestHint(args, deps);
+    const p2 = requestHint(args, deps);
+    release();
+    const [a, b] = await Promise.all([p1, p2]);
+    expect(model.calls).toBe(1);
+    expect([a.charge, b.charge].sort()).toEqual([false, true]);
+    expect(b.hint).toBe(a.hint);
+  });
+
+  it("H7: in-flight entry is removed on settle and fallbacks are not cached", async () => {
+    const model = fakeModel((n) => {
+      if (n === 1) throw new Error("x");
+      return { text: goodText, tokensIn: 1, tokensOut: 1 };
+    });
+    const deps = base();
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
+    expect((await requestHint(args, deps)).fallback).toBe(true);
+    expect((await requestHint(args, deps)).fallback).toBe(false);
+    expect(model.calls).toBe(2);
+  });
+
+  it("H7: cache sweeps expired entries and caps its size, evicting the oldest", () => {
+    let t = 0;
+    const cache = new TtlCache(1000, () => t, 3);
+    const v = { hint: "h" } as never;
+    cache.set("a", v);
+    cache.set("b", v);
+    t = 1500;
+    cache.set("c", v);
+    expect(cache.size).toBe(1);
+    cache.set("d", v);
+    cache.set("e", v);
+    cache.set("f", v);
+    expect(cache.size).toBe(3);
+    expect(cache.get("c")).toBeUndefined();
+    expect(cache.get("f")).toBeDefined();
   });
 });

@@ -14,17 +14,20 @@ export const hintBodySchema = z
   })
   .strict();
 
-/** TODO(M5): replace with the real credits module (lib/credits). Interface only; no deduction here. */
+/**
+ * Atomic credit reservation (C2). TODO(M5): lib/credits implements this in a DB transaction
+ * (reserve = conditional decrement that fails if the balance would go below zero; release = refund).
+ */
 export interface CreditsPort {
-  /** C2: must refuse before any model call when the balance would go below zero. */
-  canAfford(userId: string, cost: number): Promise<boolean>;
-  /** Called only when the result is chargeable (not a fallback, not a cache hit). */
-  charge(userId: string, cost: number, ref: { exerciseId: string; level: number }): Promise<void>;
+  /** Atomically takes `cost` credits. Returns false (and takes nothing) if the balance is too low. */
+  reserve(userId: string, cost: number): Promise<boolean>;
+  /** Gives back a reservation when the hint failed, fell back, or was a free cache hit. */
+  release(userId: string, cost: number): Promise<void>;
 }
 
 export const noopCredits: CreditsPort = {
-  canAfford: async () => true,
-  charge: async () => undefined,
+  reserve: async () => true,
+  release: async () => undefined,
 };
 
 /** TODO(M5): replace with the real session auth. Until then the user id is a header placeholder. */
@@ -105,30 +108,38 @@ export function createHintHandler(deps: HandlerDeps = defaultDeps()) {
           : await deps.loadExercise(exerciseId, { withSolution: false });
       if (!exercise) return json(404, { error: "Not found" });
 
-      if (!(await deps.credits.canAfford(userId, cost))) return json(402, { error: "Insufficient credits" });
+      // C2: refuse before any model call. Free levels reserve nothing.
+      const reserved = cost > 0;
+      if (reserved && !(await deps.credits.reserve(userId, cost))) {
+        return json(402, { error: "Insufficient credits" });
+      }
+      let keep = false;
+      try {
+        const args = {
+          level,
+          exercise,
+          learnerCode: code,
+          model: deps.model,
+          // Leak check (H4) needs the solution at every level; fetched lazily after the model answers.
+          getReferenceForLeakCheck: async () =>
+            (await deps.loadExercise(exerciseId, { withSolution: true }))?.referenceSolution ?? "",
+        } as RequestHintArgs;
+        const result = await requestHint(args, deps.requestHintDeps);
 
-      const args = {
-        level,
-        exercise,
-        learnerCode: code,
-        model: deps.model,
-        // Leak check (H4) needs the solution at every level; fetched lazily after the model answers.
-        getReferenceForLeakCheck: async () =>
-          (await deps.loadExercise(exerciseId, { withSolution: true }))?.referenceSolution ?? "",
-      } as RequestHintArgs;
-      const result = await requestHint(args, deps.requestHintDeps);
+        keep = result.charge;
 
-      if (result.charge && cost > 0) await deps.credits.charge(userId, cost, { exerciseId, level });
-
-      return json(200, {
-        hint: result.hint,
-        level: result.level,
-        fallback: result.fallback,
-        charged: result.charge && cost > 0,
-        cost: result.charge ? cost : 0,
-        cached: result.cached,
-        tokens: { in: result.tokensIn, out: result.tokensOut },
-      });
+        return json(200, {
+          hint: result.hint,
+          level: result.level,
+          fallback: result.fallback,
+          charged: keep && cost > 0,
+          cost: result.charge ? cost : 0,
+          cached: result.cached,
+          tokens: { in: result.tokensIn, out: result.tokensOut },
+        });
+      } finally {
+        if (reserved && !keep) await deps.credits.release(userId, cost);
+      }
     } catch {
       return json(500, { error: "Something went wrong" });
     }

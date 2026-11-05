@@ -51,7 +51,11 @@ export class TtlCache implements HintCache {
   constructor(
     private ttlMs: number = HINTS.cacheTtlMs,
     private now: () => number = Date.now,
+    private maxEntries: number = HINTS.cacheMaxEntries,
   ) {}
+  get size(): number {
+    return this.store.size;
+  }
   get(key: string): HintResult | undefined {
     const hit = this.store.get(key);
     if (!hit) return undefined;
@@ -62,7 +66,16 @@ export class TtlCache implements HintCache {
     return hit.value;
   }
   set(key: string, value: HintResult): void {
-    this.store.set(key, { value, expires: this.now() + this.ttlMs });
+    const t = this.now();
+    // Opportunistic sweep of expired entries, then evict oldest beyond the cap.
+    for (const [k, v] of this.store) if (v.expires <= t) this.store.delete(k);
+    this.store.delete(key);
+    this.store.set(key, { value, expires: t + this.ttlMs });
+    while (this.store.size > this.maxEntries) {
+      const oldest = this.store.keys().next().value;
+      if (oldest === undefined) break;
+      this.store.delete(oldest);
+    }
   }
 }
 
@@ -117,32 +130,71 @@ function defaultLog(e: HintLogEvent): void {
   console.info(JSON.stringify(e));
 }
 
-export async function requestHint(args: RequestHintArgs, deps: RequestHintDeps = {}): Promise<HintResult> {
-  const { level, exercise, learnerCode, model } = args;
+const inflightByCache = new WeakMap<HintCache, Map<string, Promise<HintResult>>>();
+
+export async function requestHint(
+  args: RequestHintArgs,
+  deps: RequestHintDeps = {},
+): Promise<HintResult> {
+  const { level, exercise, learnerCode } = args;
   const cache = deps.cache ?? defaultCache;
+  let inflight = inflightByCache.get(cache);
+  if (!inflight) inflightByCache.set(cache, (inflight = new Map()));
+  const key = cacheKey(exercise.id, level, hashCode(learnerCode));
+
+  const cached = cache.get(key);
+  const pending = inflight.get(key);
+  if (cached || pending) {
+    // H7: a cache hit or a concurrent identical request is never charged again.
+    const base = cached ?? (await pending!);
+    const r: HintResult = { ...base, cached: true, charge: false, tokensIn: 0, tokensOut: 0 };
+    (deps.log ?? defaultLog)(logEvent(r, exercise.id, level));
+    return r;
+  }
+  const run = generate(args, deps, cache);
+  inflight.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inflight.delete(key);
+  }
+}
+
+function logEvent(r: HintResult, exerciseId: string, level: HintLevel): HintLogEvent {
+  return {
+    event: "hint",
+    exerciseId,
+    level,
+    codeHash: r.codeHash,
+    fallback: r.fallback,
+    fallbackReason: r.fallbackReason,
+    cached: r.cached,
+    tokensIn: r.tokensIn,
+    tokensOut: r.tokensOut,
+  };
+}
+
+async function generate(
+  args: RequestHintArgs,
+  deps: RequestHintDeps,
+  cache: HintCache,
+): Promise<HintResult> {
+  const { level, exercise, learnerCode, model } = args;
   const log = deps.log ?? defaultLog;
   const codeHash = hashCode(learnerCode);
   const key = cacheKey(exercise.id, level, codeHash);
 
   const emit = (r: HintResult): HintResult => {
-    log({
-      event: "hint",
-      exerciseId: exercise.id,
-      level,
-      codeHash,
-      fallback: r.fallback,
-      fallbackReason: r.fallbackReason,
-      cached: r.cached,
-      tokensIn: r.tokensIn,
-      tokensOut: r.tokensOut,
-    });
+    log(logEvent(r, exercise.id, level));
     return r;
   };
 
-  const cached = cache.get(key);
-  if (cached) return emit({ ...cached, cached: true, charge: false, tokensIn: 0, tokensOut: 0 });
-
-  const fallback = (reason: NonNullable<HintResult["fallbackReason"]>): HintResult =>
+  // N2: tokens already spent on a model call that succeeded are kept on the fallback.
+  const fallback = (
+    reason: NonNullable<HintResult["fallbackReason"]>,
+    tokensIn = 0,
+    tokensOut = 0,
+  ): HintResult =>
     emit({
       hint: exercise.fallbackHints[level - 1],
       level,
@@ -150,8 +202,8 @@ export async function requestHint(args: RequestHintArgs, deps: RequestHintDeps =
       fallbackReason: reason,
       charge: false,
       cached: false,
-      tokensIn: 0,
-      tokensOut: 0,
+      tokensIn,
+      tokensOut,
       codeHash,
     });
 
@@ -183,10 +235,10 @@ export async function requestHint(args: RequestHintArgs, deps: RequestHintDeps =
     try {
       const reference =
         level === 4 ? args.exercise.referenceSolution : await args.getReferenceForLeakCheck?.();
-      if (!reference) return fallback("leak");
-      if (leakCheck(text, reference).leaked) return fallback("leak");
+      if (!reference) return fallback("leak", tokensIn, tokensOut);
+      if (leakCheck(text, reference).leaked) return fallback("leak", tokensIn, tokensOut);
     } catch {
-      return fallback("leak");
+      return fallback("leak", tokensIn, tokensOut);
     }
   }
 

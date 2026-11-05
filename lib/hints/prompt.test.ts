@@ -44,7 +44,11 @@ describe("prompt builder", () => {
     const prompts = ([1, 2, 3, 4, 5] as HintLevel[]).map((level) =>
       level >= 4
         ? buildHintPrompt({ level: level as 4 | 5, exercise, learnerCode })
-        : buildHintPrompt({ level: level as 1 | 2 | 3, exercise: stripSolution(exercise), learnerCode }),
+        : buildHintPrompt({
+            level: level as 1 | 2 | 3,
+            exercise: stripSolution(exercise),
+            learnerCode,
+          }),
     );
     expect(new Set(prompts.map((p) => p.system)).size).toBe(5);
     expect(prompts[0].system).toContain("at most 120 words");

@@ -23,13 +23,18 @@ describe("leakCheck", () => {
   });
 
   it("H4: a plain-language hint passes", () => {
-    expect(leakCheck("How can you tell whether a number is even? Try the remainder operator.", sol)).toMatchObject({
+    expect(
+      leakCheck("How can you tell whether a number is even? Try the remainder operator.", sol),
+    ).toMatchObject({
       leaked: false,
     });
   });
 
   it("H4: fails closed on bad input", () => {
     expect(leakCheck("hint", "").leaked).toBe(true);
-    expect(leakCheck(undefined as unknown as string, sol)).toMatchObject({ leaked: true, reason: "invalid-input" });
+    expect(leakCheck(undefined as unknown as string, sol)).toMatchObject({
+      leaked: true,
+      reason: "invalid-input",
+    });
   });
 });
