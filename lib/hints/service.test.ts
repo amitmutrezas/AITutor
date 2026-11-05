@@ -351,4 +351,54 @@ describe("requestHint", () => {
     expect(events.map((e) => e.userId)).toEqual(["user-42", "user-42"]);
     expect(JSON.stringify(events)).not.toContain("LEARNER_SECRET_CODE");
   });
+
+  it("N2: empty model output keeps the provider's token usage on the fallback and log", async () => {
+    const events: HintLogEvent[] = [];
+    const model = fakeModel(() => ({ text: "  ", tokensIn: 21, tokensOut: 0 }));
+    const r = await requestHint(
+      { level: 2, exercise: ex13, learnerCode, model, getReferenceForLeakCheck: ref },
+      { cache: new TtlCache(), log: (e) => events.push(e) },
+    );
+    expect(r).toMatchObject({
+      fallback: true,
+      fallbackReason: "model-error",
+      charge: false,
+      tokensIn: 21,
+    });
+    expect(events[0]).toMatchObject({ tokensIn: 21, fallback: true });
+  });
+
+  it("H1: an over-cap hint at levels 1-4 falls back, uncharged, uncached, with real tokens", async () => {
+    const long = Array.from({ length: 121 }, () => "word").join(" ");
+    const model = fakeModel(() => ({ text: long, tokensIn: 30, tokensOut: 40 }));
+    const deps = base();
+    const args = {
+      level: 2 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      getReferenceForLeakCheck: ref,
+    };
+    const r = await requestHint(args, deps);
+    expect(r).toMatchObject({
+      hint: "fb2",
+      fallback: true,
+      fallbackReason: "too-long",
+      charge: false,
+      tokensIn: 30,
+      tokensOut: 40,
+    });
+    await requestHint(args, deps);
+    expect(model.calls).toBe(2);
+    const exact = Array.from({ length: 120 }, () => "word").join(" ");
+    const ok = fakeModel(() => ({ text: exact, tokensIn: 1, tokensOut: 1 }));
+    expect((await requestHint({ ...args, model: ok }, base())).fallback).toBe(false);
+  });
+
+  it("H1: Reveal is exempt from the word cap", async () => {
+    const long = Array.from({ length: 500 }, () => "word").join(" ");
+    const model = fakeModel(() => ({ text: long, tokensIn: 1, tokensOut: 1 }));
+    const r = await requestHint({ level: 5, exercise, learnerCode, model }, base());
+    expect(r).toMatchObject({ hint: long, fallback: false, charge: true });
+  });
 });

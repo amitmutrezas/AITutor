@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { HINTS } from "../config";
 import { leakCheck } from "./leak";
-import { modelForLevel } from "./ladder";
+import { getLevel, modelForLevel } from "./ladder";
 import { buildHintPrompt } from "./prompt";
 import type {
   ExerciseForHint,
@@ -17,7 +17,7 @@ export interface HintResult {
   /** True when the stored prepared hint was returned (leak, error or timeout). */
   fallback: boolean;
   /** Why the fallback was used, if it was. */
-  fallbackReason?: "leak" | "model-error" | "timeout" | "prompt-error";
+  fallbackReason?: "leak" | "model-error" | "timeout" | "prompt-error" | "too-long";
   /** H5: false for fallbacks and cache hits. Billing (M5) must only charge when true. */
   charge: boolean;
   cached: boolean;
@@ -267,9 +267,18 @@ async function generate(
     text = res.text;
     tokensIn = res.tokensIn;
     tokensOut = res.tokensOut;
-    if (typeof text !== "string" || text.trim() === "") throw new Error("empty model output");
   } catch (err) {
     return await fallback(err instanceof TimeoutError ? "timeout" : "model-error");
+  }
+
+  // N2: the provider answered, so its usage is kept even if the output is unusable.
+  if (typeof text !== "string" || text.trim() === "") {
+    return await fallback("model-error", tokensIn, tokensOut);
+  }
+  // H1: enforce the per-level word cap (Reveal exempt) before leak check, cache or charge.
+  const cap = getLevel(level).wordCap;
+  if (cap !== null && text.trim().split(/\s+/).length > cap) {
+    return await fallback("too-long", tokensIn, tokensOut);
   }
 
   // H6: Reveal skips the leak check; levels 1-4 always run it (fail closed).
