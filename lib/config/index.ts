@@ -8,8 +8,8 @@ export const CREDIT_COST_BY_LEVEL = [0, 0, 1, 2, 3] as const;
 
 /** Model names come from env (see .env.example); the defaults are safe placeholders. */
 export const MODELS = {
-  low: process.env.HINT_MODEL_LOW || "claude-haiku-4-5",
-  high: process.env.HINT_MODEL_HIGH || "claude-sonnet-4-5",
+  low: process.env.HINT_MODEL_LOW || "claude-haiku-5-5",
+  high: process.env.HINT_MODEL_HIGH || "claude-sonnet-5-5",
 } as const;
 
 /** PLACEHOLDER thresholds for the leak check; tuned in M2. */
