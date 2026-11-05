@@ -137,4 +137,48 @@ describe("POST /api/hint", () => {
     expect(model.calls).toBe(1);
     expect(credits.balances.u1).toBe(4);
   });
+
+  it("H7: after a paid request drains the balance, a sequential repeat is a free 200", async () => {
+    const credits = inMemoryCredits({ u1: 1 });
+    const { post, model } = setup({ credits });
+    const first = await post(req({ ...valid, level: 3 }));
+    expect(await first.json()).toMatchObject({ charged: true });
+    expect(credits.balances.u1).toBe(0);
+    const second = await post(req({ ...valid, level: 3 }));
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ cached: true, charged: false });
+    expect(model.calls).toBe(1);
+    expect(credits.balances.u1).toBe(0);
+  });
+
+  it("H7: a concurrent identical double click is a free 200, not a 402", async () => {
+    const credits = inMemoryCredits({ u1: 1 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const model = fakeModel(async () => {
+      await gate;
+      return { text: goodText, tokensIn: 1, tokensOut: 1 };
+    });
+    const { post } = setup({ credits, model });
+    const p1 = post(req({ ...valid, level: 3 }));
+    await new Promise((r) => setTimeout(r, 5));
+    const p2 = post(req({ ...valid, level: 3 }));
+    await new Promise((r) => setTimeout(r, 5));
+    release();
+    const [a, b] = await Promise.all([p1, p2]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const bodies = [await a.json(), await b.json()];
+    expect(bodies.filter((x) => x.charged).length).toBe(1);
+    expect(model.calls).toBe(1);
+    expect(credits.balances.u1).toBe(0);
+  });
+
+  it("C2: two different codes with balance for one still give one 402", async () => {
+    const credits = inMemoryCredits({ u1: 1 });
+    const { post, model } = setup({ credits });
+    const a = await post(req({ ...valid, level: 3, code: "a" }));
+    const b = await post(req({ ...valid, level: 3, code: "b" }));
+    expect([a.status, b.status]).toEqual([200, 402]);
+    expect(model.calls).toBe(1);
+  });
 });

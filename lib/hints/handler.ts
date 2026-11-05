@@ -3,7 +3,7 @@ import { HINTS } from "../config";
 import { costForLevel } from "./ladder";
 import { createAnthropicModel } from "./anthropic";
 import { createInMemoryExerciseStore, type LoadExercise } from "./exercise-store";
-import { requestHint, type RequestHintArgs } from "./service";
+import { peekHint, requestHint, type RequestHintArgs } from "./service";
 import type { HintModel } from "./types";
 
 export const hintBodySchema = z
@@ -109,7 +109,11 @@ export function createHintHandler(deps: HandlerDeps = defaultDeps()) {
       if (!exercise) return json(404, { error: "Not found" });
 
       // C2: refuse before any model call. Free levels reserve nothing.
-      const reserved = cost > 0;
+      // H7: a cached or in-flight identical request is free, so it must not be refused for balance.
+      const free =
+        cost > 0 &&
+        peekHint({ level, exerciseId, learnerCode: code }, deps.requestHintDeps) !== null;
+      let reserved = cost > 0 && !free;
       if (reserved && !(await deps.credits.reserve(userId, cost))) {
         return json(402, { error: "Insufficient credits" });
       }
@@ -119,6 +123,7 @@ export function createHintHandler(deps: HandlerDeps = defaultDeps()) {
           level,
           exercise,
           learnerCode: code,
+          userId,
           model: deps.model,
           // Leak check (H4) needs the solution at every level; fetched lazily after the model answers.
           getReferenceForLeakCheck: async () =>
@@ -126,6 +131,13 @@ export function createHintHandler(deps: HandlerDeps = defaultDeps()) {
         } as RequestHintArgs;
         const result = await requestHint(args, deps.requestHintDeps);
 
+        if (cost > 0 && !reserved && result.charge) {
+          // The cached entry vanished between peek and request: settle the reservation now.
+          if (!(await deps.credits.reserve(userId, cost))) {
+            return json(402, { error: "Insufficient credits" });
+          }
+          reserved = true;
+        }
         keep = result.charge;
 
         return json(200, {

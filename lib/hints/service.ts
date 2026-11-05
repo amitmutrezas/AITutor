@@ -30,6 +30,8 @@ export interface HintResult {
 
 export interface HintLogEvent {
   event: "hint";
+  /** Opaque user id (never an email), so cost per learner can be computed (N2). */
+  userId?: string;
   exerciseId: string;
   level: HintLevel;
   codeHash: string;
@@ -98,7 +100,13 @@ export interface RequestHintDeps {
   modelName?: string;
 }
 
+/** Shown when even the stored fallback cannot be verified safe (POLICY 1.2). */
+export const SAFE_GENERIC_HINT =
+  "A prepared hint isn't available right now; try again or use the next level";
+
 export type RequestHintArgs = {
+  /** Opaque user id for N2 logging. */
+  userId?: string;
   learnerCode: string;
   model: HintModel;
   /**
@@ -132,6 +140,18 @@ function defaultLog(e: HintLogEvent): void {
 
 const inflightByCache = new WeakMap<HintCache, Map<string, Promise<HintResult>>>();
 
+/** H7: is there a cached or in-flight result for this request? Used to skip credit reservation. */
+export function peekHint(
+  args: { level: HintLevel; exerciseId: string; learnerCode: string },
+  deps: RequestHintDeps = {},
+): "cached" | "inflight" | null {
+  const cache = deps.cache ?? defaultCache;
+  const key = cacheKey(args.exerciseId, args.level, hashCode(args.learnerCode));
+  if (cache.get(key)) return "cached";
+  if (inflightByCache.get(cache)?.has(key)) return "inflight";
+  return null;
+}
+
 export async function requestHint(
   args: RequestHintArgs,
   deps: RequestHintDeps = {},
@@ -148,7 +168,7 @@ export async function requestHint(
     // H7: a cache hit or a concurrent identical request is never charged again.
     const base = cached ?? (await pending!);
     const r: HintResult = { ...base, cached: true, charge: false, tokensIn: 0, tokensOut: 0 };
-    (deps.log ?? defaultLog)(logEvent(r, exercise.id, level));
+    (deps.log ?? defaultLog)(logEvent(r, exercise.id, level, args.userId));
     return r;
   }
   const run = generate(args, deps, cache);
@@ -160,9 +180,15 @@ export async function requestHint(
   }
 }
 
-function logEvent(r: HintResult, exerciseId: string, level: HintLevel): HintLogEvent {
+function logEvent(
+  r: HintResult,
+  exerciseId: string,
+  level: HintLevel,
+  userId?: string,
+): HintLogEvent {
   return {
     event: "hint",
+    userId,
     exerciseId,
     level,
     codeHash: r.codeHash,
@@ -185,18 +211,34 @@ async function generate(
   const key = cacheKey(exercise.id, level, codeHash);
 
   const emit = (r: HintResult): HintResult => {
-    log(logEvent(r, exercise.id, level));
+    log(logEvent(r, exercise.id, level, args.userId));
     return r;
   };
 
+  // POLICY 1.2: a stored fallback must itself pass the leak check (Reveal exempt, H6).
+  const safeFallbackText = async (): Promise<string> => {
+    const stored = exercise.fallbackHints[level - 1];
+    if (level === 5) return stored;
+    try {
+      const reference =
+        level === 4 ? args.exercise.referenceSolution : await args.getReferenceForLeakCheck?.();
+      if (!reference || typeof stored !== "string" || leakCheck(stored, reference).leaked) {
+        return SAFE_GENERIC_HINT;
+      }
+      return stored;
+    } catch {
+      return SAFE_GENERIC_HINT;
+    }
+  };
+
   // N2: tokens already spent on a model call that succeeded are kept on the fallback.
-  const fallback = (
+  const fallback = async (
     reason: NonNullable<HintResult["fallbackReason"]>,
     tokensIn = 0,
     tokensOut = 0,
-  ): HintResult =>
+  ): Promise<HintResult> =>
     emit({
-      hint: exercise.fallbackHints[level - 1],
+      hint: await safeFallbackText(),
       level,
       fallback: true,
       fallbackReason: reason,
@@ -227,7 +269,7 @@ async function generate(
     tokensOut = res.tokensOut;
     if (typeof text !== "string" || text.trim() === "") throw new Error("empty model output");
   } catch (err) {
-    return fallback(err instanceof TimeoutError ? "timeout" : "model-error");
+    return await fallback(err instanceof TimeoutError ? "timeout" : "model-error");
   }
 
   // H6: Reveal skips the leak check; levels 1-4 always run it (fail closed).
@@ -235,10 +277,10 @@ async function generate(
     try {
       const reference =
         level === 4 ? args.exercise.referenceSolution : await args.getReferenceForLeakCheck?.();
-      if (!reference) return fallback("leak", tokensIn, tokensOut);
-      if (leakCheck(text, reference).leaked) return fallback("leak", tokensIn, tokensOut);
+      if (!reference) return await fallback("leak", tokensIn, tokensOut);
+      if (leakCheck(text, reference).leaked) return await fallback("leak", tokensIn, tokensOut);
     } catch {
-      return fallback("leak", tokensIn, tokensOut);
+      return await fallback("leak", tokensIn, tokensOut);
     }
   }
 

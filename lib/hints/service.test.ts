@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TtlCache, hashCode, requestHint, type HintLogEvent } from "./service";
+import { SAFE_GENERIC_HINT, TtlCache, hashCode, requestHint, type HintLogEvent } from "./service";
 import {
   SECRET_MARKER,
   exercise,
@@ -270,5 +270,85 @@ describe("requestHint", () => {
     expect(cache.size).toBe(3);
     expect(cache.get("c")).toBeUndefined();
     expect(cache.get("f")).toBeDefined();
+  });
+
+  it("H5/POLICY 1.2: a stored fallback containing the solution never reaches the learner", async () => {
+    const leakyEx = {
+      ...ex13,
+      fallbackHints: [1, 2, 3, 4, 5].map(
+        () => exercise.referenceSolution,
+      ) as typeof ex13.fallbackHints,
+    };
+    const failing = fakeModel(() => {
+      throw new Error("down");
+    });
+    const leaking = fakeModel(() => ({
+      text: exercise.referenceSolution,
+      tokensIn: 1,
+      tokensOut: 1,
+    }));
+    const hang = fakeModel(() => new Promise(() => undefined));
+    for (const [model, deps] of [
+      [failing, base()],
+      [leaking, base()],
+      [hang, { ...base(), timeoutMs: 10 }],
+    ] as const) {
+      const r = await requestHint(
+        { level: 2, exercise: leakyEx, learnerCode, model, getReferenceForLeakCheck: ref },
+        deps,
+      );
+      expect(r).toMatchObject({ hint: SAFE_GENERIC_HINT, fallback: true, charge: false });
+    }
+    // Level 4 uses the exercise's own solution for the check.
+    const r4 = await requestHint(
+      {
+        level: 4,
+        exercise: { ...exercise, fallbackHints: leakyEx.fallbackHints },
+        learnerCode,
+        model: failing,
+      },
+      base(),
+    );
+    expect(r4.hint).toBe(SAFE_GENERIC_HINT);
+    // Fail closed when the reference loader throws.
+    const r1 = await requestHint(
+      {
+        level: 1,
+        exercise: leakyEx,
+        learnerCode,
+        model: failing,
+        getReferenceForLeakCheck: async () => {
+          throw new Error("db");
+        },
+      },
+      base(),
+    );
+    expect(r1.hint).toBe(SAFE_GENERIC_HINT);
+  });
+
+  it("H6: level 5 fallback skips the leak check", async () => {
+    const failing = fakeModel(() => {
+      throw new Error("down");
+    });
+    const r = await requestHint({ level: 5, exercise, learnerCode, model: failing }, base());
+    expect(r).toMatchObject({ hint: "fb5", fallback: true });
+  });
+
+  it("N2: log events carry the opaque userId but never code", async () => {
+    const events: HintLogEvent[] = [];
+    const model = fakeModel(() => ({ text: goodText, tokensIn: 1, tokensOut: 1 }));
+    const args = {
+      level: 1 as const,
+      exercise: ex13,
+      learnerCode,
+      model,
+      userId: "user-42",
+      getReferenceForLeakCheck: ref,
+    };
+    const deps = { cache: new TtlCache(), log: (e: HintLogEvent) => events.push(e) };
+    await requestHint(args, deps);
+    await requestHint(args, deps);
+    expect(events.map((e) => e.userId)).toEqual(["user-42", "user-42"]);
+    expect(JSON.stringify(events)).not.toContain("LEARNER_SECRET_CODE");
   });
 });
