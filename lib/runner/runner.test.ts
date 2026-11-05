@@ -168,13 +168,15 @@ describe("R2: deepEqual and forged results", () => {
       expect(msg.results![0].message, a).toMatch(/deepEqual supports plain data only/);
     }
   });
-  it("R2: deepEqual rejects a spoofed Date and symbol-keyed properties", async () => {
+  it("R2: deepEqual rejects a spoofed Date, symbol keys and extra array properties", async () => {
     const cases = [
       ['{ getTime() { return 5; }, [Symbol.toStringTag]: "Date" }', "new Date(5)"],
       ["new Date(5)", '{ getTime() { return 5; }, [Symbol.toStringTag]: "Date" }'],
       ["{ [Symbol('x')]: 1 }", "{}"],
       ["{}", "{ [Symbol('x')]: 1 }"],
       ["[1]", "Object.assign([1], { [Symbol('x')]: 1 })"],
+      ["[1]", "Object.assign([1], { label: 'wrong' })"],
+      ["Object.assign([1], { label: 'wrong' })", "[1]"],
     ];
     for (const [a, b] of cases) {
       const { send } = bootWorker();

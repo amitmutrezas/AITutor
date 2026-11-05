@@ -50,7 +50,17 @@ function makeTestApi() {
     // Symbol-keyed own properties are invisible to Object.keys, so reject them outright.
     var keys = ownKeys(v);
     for (var k = 0; k < keys.length; k++) if (typeof keys[k] === "symbol") throw new Error(UNSUPPORTED);
-    if (Array.isArray(v) || isDate(v)) return;
+    if (Array.isArray(v)) {
+      // Extra own enumerable string properties on an array (label, etc.) would be silently
+      // ignored by the element-wise compare, so reject them like symbol keys.
+      var sk = Object.keys(v);
+      for (var j = 0; j < sk.length; j++) {
+        var n = Number(sk[j]);
+        if (!(String(n >>> 0) === sk[j] && n < v.length)) throw new Error(UNSUPPORTED);
+      }
+      return;
+    }
+    if (isDate(v)) return;
     var proto = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null) throw new Error(UNSUPPORTED);
   }
