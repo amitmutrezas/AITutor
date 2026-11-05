@@ -127,4 +127,32 @@ describe("E2: assert.deepEqual is structural", () => {
   it("E2: cyclic structures throw the plain-data error", () => {
     expect(msg("a", "b", "var a={}; a.self=a; var b={}; b.self=b;")).toBe(PLAIN_ONLY);
   });
+  it("E2: symbol-keyed properties throw the plain-data error; non-enumerable string keys are ignored", () => {
+    expect(msg("{[Symbol('k')]:1}", "{}")).toBe(PLAIN_ONLY);
+    expect(msg("{}", "{[Symbol('k')]:1}")).toBe(PLAIN_ONLY);
+    expect(eq("Object.defineProperty({a:1},'h',{value:2})", "{a:1}")).toBe(true);
+  });
+});
+
+describe("E2: solution cannot tamper with the harness", () => {
+  const wrongTests = "test('t',()=>assert.equal(f(),2));test('u',()=>assert.deepEqual(f(),[2]));";
+  const failed = (code: string) => runTests({ code, tests: wrongTests }).results.some((r) => !r.passed);
+  it("E2: assert.equal = () => {} in the solution still fails wrong code", () => {
+    expect(failed("function f(){return 1} assert.equal = () => {}; assert.deepEqual = () => {};")).toBe(true);
+  });
+  it("E2: redeclaring assert or test in the solution still fails wrong code", () => {
+    expect(failed("function f(){return 1} function assert(){}")).toBe(true);
+    expect(failed("function f(){return 1} var test = function(){}; var assert = function(){};")).toBe(true);
+    expect(failed("function f(){return 1} globalThis.test = () => {}; globalThis.assert = () => {};")).toBe(true);
+  });
+  it("E2: overwriting results state or JSON in the solution cannot make tests pass", () => {
+    expect(failed("function f(){return 1} var __results = []; JSON.stringify = () => '[]';")).toBe(true);
+  });
+  it("E2: a top-level return or thrown error in the solution counts as failed", () => {
+    expect(failed("return;")).toBe(true);
+    expect(failed("throw new Error('boom')")).toBe(true);
+  });
+  it("E2: zero registered tests is a failure, not a pass", () => {
+    expect(runTests({ code: "", tests: "" }).results[0]?.passed).toBe(false);
+  });
 });
