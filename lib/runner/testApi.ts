@@ -4,7 +4,8 @@
  *   test(name, fn)            register a test; fn may be async. A throw means failure.
  *   assert(cond, message?)    fails with `message` when cond is falsy.
  *   assert.equal(a, b, msg?)  strict equality (Object.is); also assert.deepEqual(a, b, msg?)
- *                             compares JSON-serialisable values structurally.
+ *                             compares plain data structurally (primitives, arrays, plain
+ *                             objects, Date). Map/Set/cycles/functions/class instances throw.
  *
  * The tests source runs in the same scope as the learner's code, so tests can call the
  * functions the learner defined. Example:
@@ -26,58 +27,58 @@ function makeTestApi() {
   assert.deepEqual = function (a, b, message) {
     if (!deepEq(a, b, [])) fail(message || "Expected " + show(b) + " but got " + show(a));
   };
-  // Structural comparison: primitives via Object.is, arrays element-wise, plain objects by own
-  // enumerable key set (order ignored, missing differs from undefined), Date, Map, Set, NaN.
-  // seen holds [a, b] pairs being compared so cycles terminate.
-  function deepEq(a, b, seen) {
-    if (Object.is(a, b)) return true;
-    if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-    for (var s = 0; s < seen.length; s++) if (seen[s][0] === a && seen[s][1] === b) return true;
-    seen.push([a, b]);
-    var tag = Object.prototype.toString.call(a);
-    if (tag !== Object.prototype.toString.call(b)) return false;
-    if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
-    var i;
-    if (tag === "[object Date]") return Object.is(a.getTime(), b.getTime());
-    if (Array.isArray(a)) {
-      if (a.length !== b.length) return false;
-      for (i = 0; i < a.length; i++) {
-        if ((i in a) !== (i in b)) return false;
-        if (!deepEq(a[i], b[i], seen)) return false;
+  var UNSUPPORTED = "deepEqual supports plain data only (objects, arrays, primitives, Date); " +
+    "compare Map/Set/cycles/class instances manually";
+  // JSON-like data only; anything else throws (fails closed). Primitives via Object.is (NaN
+  // equals NaN), arrays element-wise (holes differ from undefined), plain objects by own
+  // enumerable key set (order ignored, missing differs from undefined), Date by time value.
+  // stack holds the objects being compared so a cycle is detected and rejected.
+  function checkSupported(v, stack) {
+    var t = typeof v;
+    if (t === "function" || t === "symbol") throw new Error(UNSUPPORTED);
+    if (t !== "object" || v === null) return;
+    if (stack.indexOf(v) !== -1) throw new Error(UNSUPPORTED);
+    if (Array.isArray(v) || Object.prototype.toString.call(v) === "[object Date]") return;
+    var proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) throw new Error(UNSUPPORTED);
+  }
+  function deepEq(a, b, stack) {
+    checkSupported(a, stack);
+    checkSupported(b, stack);
+    // Objects are always traversed (even when identical) so cycles are detected and rejected.
+    if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+      return Object.is(a, b);
+    }
+    var aDate = Object.prototype.toString.call(a) === "[object Date]";
+    var bDate = Object.prototype.toString.call(b) === "[object Date]";
+    if (aDate || bDate) return aDate && bDate && Object.is(a.getTime(), b.getTime());
+    var aArr = Array.isArray(a), i;
+    if (aArr !== Array.isArray(b)) return false;
+    stack.push(a, b);
+    try {
+      if (aArr) {
+        if (a.length !== b.length) return false;
+        for (i = 0; i < a.length; i++) {
+          if ((i in a) !== (i in b)) return false;
+          if (!deepEq(a[i], b[i], stack)) return false;
+        }
+        return true;
+      }
+      var ka = Object.keys(a), kb = Object.keys(b);
+      if (ka.length !== kb.length) return false;
+      for (i = 0; i < ka.length; i++) {
+        if (!Object.prototype.hasOwnProperty.call(b, ka[i])) return false;
+        if (!deepEq(a[ka[i]], b[ka[i]], stack)) return false;
       }
       return true;
+    } finally {
+      stack.length -= 2;
     }
-    if (tag === "[object Map]") {
-      if (a.size !== b.size) return false;
-      var ok = true;
-      a.forEach(function (v, k) { if (!b.has(k) || !deepEq(v, b.get(k), seen)) ok = false; });
-      return ok;
-    }
-    if (tag === "[object Set]") {
-      if (a.size !== b.size) return false;
-      var found = true;
-      a.forEach(function (v) {
-        if (b.has(v)) return;
-        var match = false;
-        b.forEach(function (w) { if (!match && deepEq(v, w, seen.slice())) match = true; });
-        if (!match) found = false;
-      });
-      return found;
-    }
-    var ka = Object.keys(a), kb = Object.keys(b);
-    if (ka.length !== kb.length) return false;
-    for (i = 0; i < ka.length; i++) {
-      if (!Object.prototype.hasOwnProperty.call(b, ka[i])) return false;
-      if (!deepEq(a[ka[i]], b[ka[i]], seen)) return false;
-    }
-    return true;
   }
   function show(v) {
     if (v === undefined) return "undefined";
     if (typeof v === "function") return "[function]";
     if (typeof v === "number") return Object.is(v, -0) ? "-0" : String(v);
-    if (v instanceof Map) return "Map(" + show(Array.from(v.entries())) + ")";
-    if (v instanceof Set) return "Set(" + show(Array.from(v.values())) + ")";
     try { return JSON.stringify(v, function (k, x) { return x === undefined ? "undefined" : (typeof x === "number" && !isFinite(x) ? String(x) : x); }); } catch (e) { return String(v); }
   }
   function test(name, fn) { tests.push({ name: String(name), fn: fn }); }

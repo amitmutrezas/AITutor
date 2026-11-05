@@ -137,7 +137,7 @@ describe("R2: deepEqual and forged results", () => {
     expect(await eq("{a:1}", "{a:1,b:undefined}")).toBe(false);
     expect(await eq("[1,,3]", "[1,undefined,3]")).toBe(false);
   });
-  it("R2: deepEqual handles nested, arrays, NaN, Date, Map, Set, cycles", async () => {
+  it("R2: deepEqual handles nested, arrays, NaN and Date", async () => {
     expect(await eq("{x:[1,{y:[2]}]}", "{x:[1,{y:[2]}]}")).toBe(true);
     expect(await eq("{x:[1,{y:[2]}]}", "{x:[1,{y:[3]}]}")).toBe(false);
     expect(await eq("[1,2]", "[2,1]")).toBe(false);
@@ -146,13 +146,27 @@ describe("R2: deepEqual and forged results", () => {
     expect(await eq("[NaN]", "[NaN]")).toBe(true);
     expect(await eq("new Date(5)", "new Date(5)")).toBe(true);
     expect(await eq("new Date(5)", "new Date(6)")).toBe(false);
-    expect(await eq("new Map([[1,{a:1}]])", "new Map([[1,{a:1}]])")).toBe(true);
-    expect(await eq("new Map([[1,2]])", "new Map([[1,3]])")).toBe(false);
-    expect(await eq("new Set([1,2])", "new Set([2,1])")).toBe(true);
-    expect(await eq("new Set([1,2])", "new Set([1,3])")).toBe(false);
     expect(await eq("1", "'1'")).toBe(false);
+    expect(await eq("{a:1}", "[1]")).toBe(false);
+  });
+  it("R2: deepEqual throws a clear error for Map, Set, cycles, functions, class instances", async () => {
     const cyc = "(()=>{const a={};a.s=a;return a})()";
-    expect(await eq(cyc, cyc)).toBe(true);
+    const cases = [
+      ["new Map()", "new Map()"],
+      ["new Set()", "new Set()"],
+      [cyc, cyc],
+      ["()=>1", "()=>1"],
+      ["Symbol('x')", "Symbol('x')"],
+      ["new Uint8Array(1)", "new Uint8Array(1)"],
+      ["new (class A{})()", "new (class A{})()"],
+      ["{a:1}", "new Map()"],
+    ];
+    for (const [a, b] of cases) {
+      const { send } = bootWorker();
+      const msg = await send("", `test('t', () => { assert.deepEqual(${a}, ${b}); });`);
+      expect(msg.results![0].passed, a).toBe(false);
+      expect(msg.results![0].message, a).toMatch(/deepEqual supports plain data only/);
+    }
   });
   it("R2: a top-level return of fake passing results does not pass", async () => {
     const { send } = bootWorker();
