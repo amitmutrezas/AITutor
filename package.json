@@ -12,14 +12,14 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "exercises:verify": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/verify-exercises.ts",
+    "exercises:verify": "node scripts/not-implemented.mjs exercises:verify M1",
     "evals:product": "node scripts/not-implemented.mjs evals:product M2"
   },
   "dependencies": {
     "next": "^16.4.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "zod": "^4.6.7"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
