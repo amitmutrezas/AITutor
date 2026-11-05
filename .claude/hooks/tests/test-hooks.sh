@@ -29,10 +29,22 @@ expect 2 $H/bash-paths.sh '{"tool_input":{"command":"sed -i s/a/b/ POLICY.md"}}'
 expect 2 $H/bash-paths.sh '{"tool_input":{"command":"python3 -c \"open(\\\".github/workflows/ci.yml\\\",\\\"w\\\")\""}}'
 expect 0 $H/bash-paths.sh '{"tool_input":{"command":"cat POLICY.md"}}'
 expect 0 $H/bash-paths.sh '{"tool_input":{"command":"pnpm test"}}'
+expect 2 $H/bash-paths.sh '{"tool_input":{"command":"cat .env"}}'
+expect 2 $H/bash-paths.sh '{"tool_input":{"command":"python3 -c \"print(open(\\\".env.local\\\").read())\""}}'
+expect 2 $H/bash-paths.sh '{"tool_input":{"command":"ls secrets/"}}'
+expect 0 $H/bash-paths.sh '{"tool_input":{"command":"cat .env.example"}}'
+expect 0 $H/bash-paths.sh '{"tool_input":{"command":"node -p process.env.HOME"}}'
+expect 2 $H/bash-paths.sh '{"tool_input":{"command":"sed -i s/DRAFT/APPROVED/ intent/PLAN.md"}}'
+expect 2 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/intent/PLAN.md\",\"new_string\":\"Status: APPROVED\"}}"
+expect 0 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/intent/PLAN.md\",\"new_string\":\"M0 done\"}}"
 expect 0 $H/secrets-guard.sh '{"tool_input":{"command":"git status"}}'
 # secrets-guard: .env co-staged with .env.example must still block
 tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && echo A=1 > .env && echo A= > .env.example && git add -f .env .env.example \
   && printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | "$OLDPWD/$H/secrets-guard.sh" >/dev/null 2>&1; [ $? = 2 ] ) \
   && echo "ok   secrets-guard co-staged .env" || { echo "FAIL secrets-guard co-staged .env"; fail=1; }
+# empty .env must also block (no added text lines)
+tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && : > .env && git add -f .env \
+  && printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | "$OLDPWD/$H/secrets-guard.sh" >/dev/null 2>&1; [ $? = 2 ] ) \
+  && echo "ok   secrets-guard empty .env" || { echo "FAIL secrets-guard empty .env"; fail=1; }
 rm -rf "$tmp"
 exit $fail

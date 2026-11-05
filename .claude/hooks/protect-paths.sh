@@ -24,6 +24,15 @@ if printf '%s' "$rel" | grep -Eq "$protected" && [ "${ALLOW_PROTECTED:-}" != "1"
   exit 2
 fi
 
+# Only a human flips PLAN.md to APPROVED.
+if [ "$rel" = "intent/PLAN.md" ] && [ "${ALLOW_PROTECTED:-}" != "1" ]; then
+  newtext="$(printf '%s' "$input" | jq -r '[.tool_input.new_string, .tool_input.content, (.tool_input.edits // [] | map(.new_string) | join("\n"))] | map(select(. != null)) | join("\n")')"
+  if printf '%s' "$newtext" | grep -Eq 'Status:[[:space:]]*\**APPROVED'; then
+    echo "Blocked: only Amit approves intent/PLAN.md. Do not write 'Status: APPROVED' (POLICY.md section 7)." >&2
+    exit 2
+  fi
+fi
+
 appcode='^(app/|lib/|components/|content/|scripts/|tests/|e2e/|db/|src/|public/|package\.json|next\.config)'
 if printf '%s' "$rel" | grep -Eq "$appcode"; then
   if ! grep -Eq '^Status:[[:space:]]*\**APPROVED' "$root/intent/PLAN.md" 2>/dev/null; then

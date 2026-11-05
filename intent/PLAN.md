@@ -1,7 +1,7 @@
 # Plan: Unstuck MVP (from INTENT.md and SPEC.md, 2026-11-05)
 
 Status: **DRAFT. Not approved. No implementation starts until Amit approves this file in the project thread.**
-After approval: a commit titled "plan: approved" updates this line, and only then do build sessions begin.
+After approval: Amit (not an agent) changes this line to `Status: APPROVED`, in a small PR carrying the `policy-approved` label or a direct commit. Build sessions begin only after that is on `main`.
 
 ## Proposed stack (confirm or change)
 

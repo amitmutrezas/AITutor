@@ -48,9 +48,20 @@ jobs:
               *) echo "Protected paths changed without the policy-approved label (added by Amit):"; echo "$changed" | grep -E "$protected"; exit 1 ;;
             esac
           fi
+          approved='^Status:[[:space:]]*\**APPROVED'
+          base_plan="$(git show "$BASE_SHA:intent/PLAN.md" 2>/dev/null || true)"
+          # Changing the plan's status line to APPROVED is Amit's call: needs the label.
+          if echo "$changed" | grep -qx 'intent/PLAN.md' && grep -Eq "$approved" intent/PLAN.md \
+             && ! echo "$base_plan" | grep -Eq "$approved"; then
+            case ",$LABELS," in
+              *,policy-approved,*) echo "Plan approval PR with policy-approved label." ;;
+              *) echo "intent/PLAN.md was set to APPROVED without the policy-approved label (added by Amit)."; exit 1 ;;
+            esac
+          fi
+          # Application code is allowed only if the TRUSTED BASE plan is already approved.
           appcode='^(app/|lib/|components/|content/|scripts/|tests/|e2e/|db/|src/|public/|package\.json|next\.config)'
-          if echo "$changed" | grep -Eq "$appcode" && ! grep -Eq '^Status:[[:space:]]*\**APPROVED' intent/PLAN.md; then
-            echo "Application code changed but intent/PLAN.md is not APPROVED."; exit 1
+          if echo "$changed" | grep -Eq "$appcode" && ! echo "$base_plan" | grep -Eq "$approved"; then
+            echo "Application code changed but intent/PLAN.md is not APPROVED on the base branch."; exit 1
           fi
 
   app:

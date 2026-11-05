@@ -9,6 +9,20 @@ cmd="$(jq -r '.tool_input.command // empty')"
 [ -z "$cmd" ] && exit 0
 [ "${ALLOW_PROTECTED:-}" = "1" ] && exit 0
 
+# Secrets must not enter the agent context by any route (POLICY.md 4.3): block shell commands that
+# name a real env file or the secrets/ folder, whatever the verb. `.env.example` is fine.
+if printf '%s' "$cmd" | grep -oE '(^|[^A-Za-z0-9_])\.env[A-Za-z0-9_.-]*' | sed -E 's/^[^.]*//' | grep -Evq '^\.env\.example$|^$' \
+   || printf '%s' "$cmd" | grep -Eq '(^|[^A-Za-z0-9_])secrets/'; then
+  echo "Blocked: this command names an env file or secrets/ (POLICY.md 4.1, 4.3). Use .env.example for variable names." >&2
+  exit 2
+fi
+
+# Only a human approves the plan: block shell writes that set PLAN.md to APPROVED.
+if printf '%s' "$cmd" | grep -Eq 'PLAN\.md' && printf '%s' "$cmd" | grep -Eqi 'APPROVED'; then
+  echo "Blocked: only Amit approves intent/PLAN.md (POLICY.md section 7)." >&2
+  exit 2
+fi
+
 writeish='(>|>>|\bsed[[:space:]]+(-[a-zA-Z]*i|--in-place)|\btee\b|\bmv\b|\bcp\b|\brm\b|\bperl[[:space:]]+-[a-zA-Z]*i|\btruncate\b|\bdd\b|\binstall\b|\bpython3?\b|\bnode\b|\bgit[[:space:]]+(checkout|restore|apply|rm|mv)\b|\bpatch\b|\bln\b)'
 printf '%s' "$cmd" | grep -Eq "$writeish" || exit 0
 
