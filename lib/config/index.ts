@@ -39,6 +39,6 @@ export const HINTS = {
 /** PLACEHOLDER plans: prices and credits are not decided (PLAN.md decision 1). */
 export const PLANS = {
   free: { name: "Free (placeholder)", monthlyCredits: 0, maxLevel: 2 },
-  starter: { name: "Starter (placeholder)", monthlyCredits: 30, maxLevel: 4 },
-  pro: { name: "Pro (placeholder)", monthlyCredits: 100, maxLevel: 4 },
+  starter: { name: "Starter (placeholder)", monthlyCredits: 30, maxLevel: 5 },
+  pro: { name: "Pro (placeholder)", monthlyCredits: 100, maxLevel: 5 },
 } as const;
