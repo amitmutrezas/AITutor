@@ -2,7 +2,8 @@
 # PreToolUse gate for Bash. On `git commit`, refuse if the staged diff looks like it contains a secret.
 set -euo pipefail
 cmd="$(jq -r '.tool_input.command // empty')"
-printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+commit' || exit 0
+# Match `git commit` including global options, e.g. `git -c k=v commit` or `git -C dir commit`.
+printf '%s' "$cmd" | grep -Eq '(^|[;&|(`[:space:]])git[[:space:]]+([^;&|]*[[:space:]])?commit([[:space:]]|$)' || exit 0
 # Filter .env.example out first, so co-staging it cannot hide a real env file.
 if git diff --cached --name-only | grep -Ev '(^|/)\.env\.example$' | grep -Eq '(^|/)\.env($|\.)'; then
   echo "Blocked: .env file staged (POLICY.md 4.1). Only .env.example may be committed." >&2

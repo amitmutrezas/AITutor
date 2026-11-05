@@ -19,6 +19,9 @@ echo
 echo "Per PR: review comments and Important findings (from the Codex summary line 'Important: N, Nits: M')"
 for num in $(jq -r '.[].number' <<<"$prs"); do
   comments="$(gh api "repos/$repo/pulls/$num/comments" --paginate --slurp | jq '[.[][]] | length')"
-  tally="$(gh api "repos/$repo/issues/$num/comments" --paginate --slurp | jq -r '[.[][].body | capture("Important: (?<i>[0-9]+), Nits: (?<n>[0-9]+)")?] | last // empty | "Important \(.i), Nits \(.n)"')"
+  # Codex posts the tally in review bodies or in conversation comments; look at both.
+  bodies="$( { gh api "repos/$repo/pulls/$num/reviews" --paginate --slurp | jq -r '.[][].body // empty'; \
+               gh api "repos/$repo/issues/$num/comments" --paginate --slurp | jq -r '.[][].body // empty'; } )"
+  tally="$(printf '%s\n' "$bodies" | grep -Eo 'Important: [0-9]+, Nits: [0-9]+' | tail -1 | sed -E 's/Important: ([0-9]+), Nits: ([0-9]+)/Important \1, Nits \2/')"
   echo "- #$num: $comments inline comments; ${tally:-no review tally found}"
 done

@@ -42,6 +42,11 @@ expect 0 $H/secrets-guard.sh '{"tool_input":{"command":"git status"}}'
 tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && echo A=1 > .env && echo A= > .env.example && git add -f .env .env.example \
   && printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | "$OLDPWD/$H/secrets-guard.sh" >/dev/null 2>&1; [ $? = 2 ] ) \
   && echo "ok   secrets-guard co-staged .env" || { echo "FAIL secrets-guard co-staged .env"; fail=1; }
+# commit with global git options must still be scanned
+tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && echo 'k = "sk-ant-abcdefghijklmnop1234"' > a.txt && git add a.txt \
+  && printf '%s' '{"tool_input":{"command":"git -c commit.gpgsign=false commit -m x"}}' | "$OLDPWD/$H/secrets-guard.sh" >/dev/null 2>&1; [ $? = 2 ] ) \
+  && echo "ok   secrets-guard global options" || { echo "FAIL secrets-guard global options"; fail=1; }
+rm -rf "$tmp"
 # empty .env must also block (no added text lines)
 tmp="$(mktemp -d)"; ( cd "$tmp" && git init -q && : > .env && git add -f .env \
   && printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | "$OLDPWD/$H/secrets-guard.sh" >/dev/null 2>&1; [ $? = 2 ] ) \
