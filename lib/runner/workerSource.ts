@@ -1,7 +1,7 @@
 import { TEST_API_SOURCE } from "./testApi";
 
 /**
- * R1: the Worker body, as plain JavaScript text so it can be loaded from a Blob URL and also
+ * R1: the Worker body, as plain JavaScript text so it can be served from /runner/worker.js (own CSP) and also
  * evaluated in Vitest with a fake `self`. Network and import APIs are shadowed BEFORE any
  * learner code is evaluated. A Worker has no host DOM by construction.
  *
@@ -29,12 +29,21 @@ ${TEST_API_SOURCE}
     var nonce = String(data.nonce);
     try {
       var api = makeTestApi();
-      var body = String(data.code) + "\\n;\\n" + String(data.tests);
+      // The harness is handed in under a per-run hidden parameter name. The tests run inside an
+      // inner function whose parameters are test and assert, bound to references captured here
+      // before learner code is evaluated, so re-declaring assert/test in learner code (or
+      // mutating them, they are frozen) cannot change what the tests call. Not a trust boundary:
+      // results are never trusted server side.
+      var hidden = "__h_" + nonce.replace(/[^a-z0-9]/gi, "");
+      var body = String(data.code) + "\\n;\\n" + "return " + hidden +
+        ".run(function (test, assert) {\\n" + String(data.tests) + "\\n}, " + hidden + ");";
       // Blocked names are also bound as parameters, so learner code sees the stubs even if a
       // global could not be redefined.
-      var fn = Function.apply(null, ["test", "assert"].concat(blocked, [body]));
-      fn.apply(null, [api.test, api.assert].concat(stubs));
-      var results = await api.run();
+      var fn = Function.apply(null, [hidden, "test", "assert"].concat(blocked, [body]));
+      var harness = Object.freeze({
+        run: function (testsFn) { testsFn(api.test, api.assert); return api.run(); },
+      });
+      var results = await fn.apply(null, [harness, api.test, api.assert].concat(stubs));
       post({ type: "done", nonce: nonce, results: results });
     } catch (e) {
       post({ type: "error", nonce: nonce, message: e && e.message ? String(e.message) : String(e) });

@@ -1,6 +1,5 @@
 import { outcomeFromMessage, timeoutOutcome } from "./results";
 import type { RunOutcome } from "./types";
-import { WORKER_SOURCE } from "./workerSource";
 
 /** Default time limit for learner code (R1). */
 export const DEFAULT_TIME_LIMIT_MS = 2000;
@@ -15,12 +14,12 @@ export interface WorkerLike {
 
 export type WorkerFactory = () => WorkerLike;
 
-/** Thin browser glue: Blob URL worker. Only called from client components. */
+/**
+ * Thin browser glue. The script comes from a route with its own CSP (default-src 'none'), which
+ * the worker enforces, denying all network and module loads. Only called from client components.
+ */
 export function browserWorkerFactory(): WorkerLike {
-  const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
-  const w = new Worker(url);
-  URL.revokeObjectURL(url);
-  return w as unknown as WorkerLike;
+  return new Worker("/runner/worker.js") as unknown as WorkerLike;
 }
 
 function newNonce(): string {

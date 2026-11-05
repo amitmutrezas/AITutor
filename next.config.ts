@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
-// R1: the exercise Worker is created from a Blob URL and inherits this policy. script-src without
-// remote hosts blocks dynamic import() of external modules; connect-src blocks fetch/XHR/WebSocket.
+// R1: page-level policy. The exercise Worker script (/runner/worker.js) is excluded below because
+// its route sets its own stricter CSP, which the worker enforces (blocks even same-origin imports).
 // 'unsafe-inline' and 'unsafe-eval' are needed by Next.js and by the Function-based test harness.
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
-  "worker-src 'self' blob:",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "worker-src 'self'",
   "connect-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
@@ -17,7 +17,7 @@ const csp = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   async headers() {
-    return [{ source: "/(.*)", headers: [{ key: "Content-Security-Policy", value: csp }] }];
+    return [{ source: "/((?!runner/worker\\.js).*)", headers: [{ key: "Content-Security-Policy", value: csp }] }];
   },
 };
 

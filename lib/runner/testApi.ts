@@ -44,6 +44,13 @@ function makeTestApi() {
     }
     return results;
   }
-  return { test: test, assert: assert, run: run };
+  // Frozen so learner code cannot do assert.equal = () => {}. This protects honest progress
+  // tracking only: results are never trusted server side (solved state is local), so it is not
+  // a trust boundary.
+  Object.freeze(assert.equal);
+  Object.freeze(assert.deepEqual);
+  Object.freeze(assert);
+  Object.freeze(test);
+  return Object.freeze({ test: test, assert: assert, run: run });
 }
 `;

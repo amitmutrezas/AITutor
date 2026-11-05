@@ -99,6 +99,31 @@ describe("R1: forged results", () => {
   });
 });
 
+describe("R2: assertion tampering", () => {
+  const FAILING = "test('fails', () => { assert.equal(add(1, 2), 3); });";
+  const ADD = "function add(a, b) { return a - b; }\n";
+  it("R2: assert.equal = () => {} in learner code still leaves failing tests failing", async () => {
+    const { send } = bootWorker();
+    const msg = await send(ADD + "assert.equal = () => {};", FAILING);
+    expect(msg.results![0].passed).toBe(false);
+  });
+  it("R2: function assert() {} and var test = ... in learner code leave failing tests failing", async () => {
+    const { send } = bootWorker();
+    const a = await send(ADD + "function assert() {}", FAILING);
+    expect(a.results![0].passed).toBe(false);
+    const b = await send(ADD + "var test = function () {}; var assert = { equal() {} };", FAILING);
+    expect(b.results![0].passed).toBe(false);
+  });
+  it("R2: the harness test and assert are frozen but readable", async () => {
+    const { send } = bootWorker();
+    const msg = await send(
+      "var ok = Object.isFrozen(assert) && Object.isFrozen(assert.equal) && Object.isFrozen(assert.deepEqual) && Object.isFrozen(test);",
+      "test('frozen', () => { if (!ok) throw new Error('harness not frozen'); });",
+    );
+    expect(msg.results![0].passed).toBe(true);
+  });
+});
+
 describe("R2: result shaping", () => {
   it("R2: pass/fail per test with the failing assertion message", async () => {
     const { send } = bootWorker();
@@ -151,11 +176,20 @@ function walk(dir: string, out: string[] = []): string[] {
 describe("R3: learner code never runs on our servers", () => {
   it("R3: no server file imports lib/runner", () => {
     const root = process.cwd();
+    // Exactly one server file may import from lib/runner, and only workerSource: the route that
+    // serves the static worker script text with its own CSP. It never executes learner code.
+    const allowed = join(root, "app/runner/worker.js/route.ts");
     const serverFiles = walk(join(root, "app")).filter((f) => /\/api\/|\/route\.ts$/.test(f));
     serverFiles.push(...walk(join(root, "lib")).filter((f) => !f.includes("/lib/runner/")));
     for (const f of serverFiles) {
       if (f.endsWith(".test.ts")) continue;
       const src = readFileSync(f, "utf8");
+      if (f === allowed) {
+        const imports = [...src.matchAll(/from\s+["']([^"']*runner[^"']*)["']/g)].map((m) => m[1]);
+        expect(imports.length).toBe(1);
+        expect(imports[0].endsWith("lib/runner/workerSource")).toBe(true);
+        continue;
+      }
       expect(src, f).not.toMatch(/from\s+["'][^"']*runner[^"']*["']/);
     }
   });

