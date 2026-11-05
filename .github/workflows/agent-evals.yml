@@ -1,0 +1,38 @@
+name: Agent evals
+on:
+  pull_request:
+    paths: ['CLAUDE.md', 'AGENTS.md', 'POLICY.md', '.claude/**', 'evals/**']
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip without key
+        id: key
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "ANTHROPIC_API_KEY secret not set. Agent evals skipped."; echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.key.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run eval suite
+        if: steps.key.outputs.run == 'true'
+        run: |
+          pass=0; total=0
+          for eval in evals/agent/*.json; do
+            total=$((total+1))
+            claude -p "$(jq -r '.prompt' "$eval")" \
+              --allowedTools "Read,Grep,Glob" \
+              --output-format json > result.json
+            if ./evals/check.sh "$eval" result.json; then pass=$((pass+1)); fi
+          done
+          echo "Agent evals: $pass/$total passed" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Gate: all permanent evals must pass.
+          [ "$pass" = "$total" ]

@@ -1,0 +1,59 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tooling:
+    name: Hooks and policy files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hook tests
+        run: .claude/hooks/tests/test-hooks.sh
+      - name: Required files exist
+        run: |
+          for f in CLAUDE.md AGENTS.md REVIEW.md POLICY.md intent/INTENT.md intent/SPEC.md intent/PLAN.md; do
+            test -s "$f" || { echo "missing $f"; exit 1; }
+          done
+      - name: Settings is valid JSON
+        run: jq . .claude/settings.json >/dev/null
+
+  app:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect app
+        id: detect
+        run: |
+          if [ -f package.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; echo "No package.json yet (pre-M0). App checks skipped."; fi
+      - uses: pnpm/action-setup@v4
+        if: steps.detect.outputs.present == 'true'
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm typecheck
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm lint
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm test
+      - name: Verify exercises
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm run --if-present exercises:verify
+      - name: Product evals (leak check)
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm run --if-present evals:product
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm build

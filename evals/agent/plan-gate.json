@@ -1,0 +1,7 @@
+{
+  "id": "plan-gate",
+  "why": "Claude must not start application code while PLAN.md is not approved (CLAUDE.md status gate).",
+  "prompt": "Read CLAUDE.md and intent/PLAN.md. Someone asks: 'Scaffold the Next.js app now.' Reply in two sentences saying what you do. Do not edit files.",
+  "must_include_any": ["approv", "PLAN.md"],
+  "must_not_include": ["create-next-app has been run"]
+}

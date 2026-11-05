@@ -1,0 +1,372 @@
+<title>Unstuck Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+/* Layout concept: tutorial-site chrome (green top bar, left chapter list, content column, right hint panel), in the spirit of TutorialsPoint and GeeksforGeeks. Test instrument, not production code. */
+:root{
+  --green:#2f8d46; --green-d:#256f38; --green-l:#e6f4ea;
+  --ink:#1c2b22; --mid:#5d6b63; --line:#d5ddd8; --fill:#f2f5f3; --paper:#ffffff; --bg:#eef2ef;
+  --warn:#b45309; --warn-l:#fdf3e1; --bad:#b3261e; --bad-l:#fdeceb;
+  --code-bg:#14201a; --code-ink:#dbe8e0; --note:#fff8c4; --note-line:#d9cf7a;
+  --font:"Source Sans 3",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --green:#4cb868; --green-d:#6fd08a; --green-l:#17301f;
+  --ink:#e6eee9; --mid:#9fb0a6; --line:#2d3d34; --fill:#1b2820; --paper:#121c16; --bg:#0c130f;
+  --warn:#f0b35a; --warn-l:#2d2310; --bad:#ff8a80; --bad-l:#341614;
+  --code-bg:#0a100d; --code-ink:#dbe8e0; --note:#3b3714; --note-line:#6b6320; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --green:#4cb868; --green-d:#6fd08a; --green-l:#17301f;
+  --ink:#e6eee9; --mid:#9fb0a6; --line:#2d3d34; --fill:#1b2820; --paper:#121c16; --bg:#0c130f;
+  --warn:#f0b35a; --warn-l:#2d2310; --bad:#ff8a80; --bad-l:#341614;
+  --code-bg:#0a100d; --code-ink:#dbe8e0; --note:#3b3714; --note-line:#6b6320; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 var(--font);color:var(--ink);background:var(--bg);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+#app{max-width:1180px;margin:0 auto}
+.kit{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 0}
+.kit h1{font-size:15px;margin:0;flex:1 1 220px;font-weight:700}
+.kit small{color:var(--mid);font-weight:400}
+.kit button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:6px;padding:5px 10px;cursor:pointer}
+.kit button[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
+.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:16px;align-items:start;padding-bottom:32px}
+nav.list{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px;position:sticky;top:8px}
+nav.list a{display:block;padding:6px 8px;border-radius:5px;color:var(--ink);text-decoration:none;font-size:14px}
+nav.list a small{display:block;color:var(--mid);font-size:11.5px}
+nav.list a.on{background:var(--green-l);color:var(--green-d);font-weight:600}
+nav.list .grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mid);margin:10px 8px 4px}
+.screen{display:none;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:0}
+.screen.on{display:block}
+.trace{font-size:11.5px;color:var(--mid);background:var(--fill);border-bottom:1px dashed var(--line);padding:5px 14px}
+/* site chrome */
+.site{background:var(--green);color:#fff;display:flex;align-items:center;gap:6px;padding:0 14px;flex-wrap:wrap}
+.site .brand{font-weight:700;font-size:20px;padding:10px 12px 10px 0;margin-right:6px;cursor:pointer}
+.site a{color:#fff;opacity:.92;padding:12px 10px;font-size:15px;cursor:pointer;text-decoration:none}
+.site .sp{flex:1}
+.site .credits{background:rgba(255,255,255,.18);border-radius:14px;padding:3px 10px;font-size:13.5px}
+.crumb{font-size:13px;color:var(--mid);padding:10px 20px 0}
+.pad{padding:16px 20px 24px}
+h2{font-size:26px;line-height:1.2;margin:6px 0 8px;font-weight:700}
+h3{font-size:18px;margin:16px 0 6px}
+p{margin:6px 0}.muted{color:var(--mid)}
+.btn{display:inline-block;text-align:center;padding:9px 18px;border-radius:6px;border:2px solid var(--green);background:var(--green);color:#fff;font:inherit;font-weight:600;font-size:15px;cursor:pointer;margin:6px 6px 6px 0}
+.btn.secondary{background:var(--paper);color:var(--green-d)}
+.btn.block{display:block;width:100%;margin-right:0}
+.btn.small{padding:5px 12px;font-size:14px}
+.btn.danger{background:var(--paper);border-color:var(--bad);color:var(--bad)}
+.box{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--paper)}
+.box.soft{background:var(--fill)}.box.ok{background:var(--green-l);border-color:var(--green)}
+.box.warn{background:var(--warn-l);border-color:var(--warn)}.box.bad{background:var(--bad-l);border-color:var(--bad)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+label{display:block;font-size:14px;margin:12px 0 4px;font-weight:600}
+.input{border:1.5px solid var(--line);border-radius:6px;padding:9px 11px;color:var(--mid);background:var(--paper)}
+.input.err{border-color:var(--bad)}.errmsg{font-size:13.5px;color:var(--bad);margin-top:4px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--fill)}
+.row[data-go]{cursor:pointer}.row[data-go]:hover{background:var(--green-l)}
+.pill{font-size:12px;border-radius:10px;padding:1px 8px;background:var(--fill);border:1px solid var(--line);color:var(--mid);white-space:nowrap}
+.pill.g{background:var(--green-l);border-color:var(--green);color:var(--green-d)}
+.pill.w{background:var(--warn-l);border-color:var(--warn);color:var(--warn)}
+/* workspace */
+.ws{display:grid;grid-template-columns:170px minmax(0,1.5fr) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
+.ws>div{padding:14px;min-width:0}
+.ws .side{background:var(--fill);border-right:1px solid var(--line);font-size:14px}
+.ws .side a{display:block;padding:5px 6px;border-radius:4px;color:var(--ink)}
+.ws .side a.on{background:var(--green-l);color:var(--green-d);font-weight:600}
+.ws .hints{border-left:1px solid var(--line)}
+pre.code{background:var(--code-bg);color:var(--code-ink);font:13px/1.55 var(--mono);padding:12px;border-radius:6px;overflow-x:auto;margin:8px 0}
+pre.code .hl{background:rgba(240,179,90,.22);display:block}
+.tests{font-size:14px}.tests div{padding:3px 0}.t-ok{color:var(--green-d)}.t-bad{color:var(--bad)}
+.rung{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);border-radius:6px;padding:6px 10px;margin:5px 0;font-size:14.5px;background:var(--paper)}
+.rung b{flex:1}.rung.on{border-color:var(--green);background:var(--green-l)}.rung[data-go],.rung[data-sgo]{cursor:pointer}
+.steps{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}
+.steps button,.states button{font:12.5px var(--font);border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:12px;padding:3px 9px;cursor:pointer}
+.steps button.on,.states button.on{background:var(--ink);color:var(--paper)}
+.states{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}
+[data-state]{display:none}[data-state].on{display:block}
+.note{display:none;background:var(--note);border:1px solid var(--note-line);border-radius:6px;padding:7px 10px;font-size:13px;margin:8px 0}
+#app.notes .note{display:block}
+.modal{border:2px solid var(--ink);border-radius:8px;padding:12px;background:var(--paper);box-shadow:0 4px 14px rgba(0,0,0,.18)}
+#app.proto [data-go],#app.proto [data-sgo]{outline:2px dashed transparent}
+#app.proto [data-go]:hover,#app.proto [data-sgo]:hover{outline-color:var(--green)}
+#app.proto .btn:not([data-go]):not([data-sgo]),#app.proto .rung:not([data-go]):not([data-sgo]){opacity:.5;cursor:not-allowed}
+.foot{font-size:13px;color:var(--mid);border-top:1px solid var(--line);padding:10px 20px;display:flex;gap:16px;flex-wrap:wrap}
+@media (max-width:880px){
+  .layout{grid-template-columns:1fr}nav.list{position:static}
+  .ws{grid-template-columns:1fr}.ws .side,.ws .hints{border:0;border-top:1px solid var(--line)}
+  .grid2,.grid3{grid-template-columns:1fr}
+}
+</style>
+
+<div id="app" class="notes">
+<div class="kit">
+  <h1>Unstuck (working name) - lo-fi prototype <small>not production code. Sample data throughout.</small></h1>
+  <button id="tNotes" aria-pressed="true">Notes</button>
+  <button id="tProto" aria-pressed="false">Prototype mode</button>
+  <button id="tReset">Restart</button>
+</div>
+<div class="layout">
+<nav class="list" id="list" aria-label="Screens"></nav>
+<main id="screens">
+
+<!-- 1 LANDING -->
+<section class="screen" id="landing" data-title="Landing" data-trace="J1 / S1, S6" data-path="critical">
+  <div class="trace"></div><div class="site-slot"></div>
+  <div class="pad">
+    <h2>Stuck on a coding exercise? Get a hint, not the answer.</h2>
+    <p class="muted" style="max-width:62ch">Unstuck gives you five levels of help on every exercise, from a gentle nudge to the full solution. You choose how much help you want, and you see the cost before you spend it.</p>
+    <button class="btn" data-go="signup">Start free</button><button class="btn secondary" data-go="pricing">See plans</button>
+    <div class="grid3" style="margin-top:14px">
+      <div class="box"><b>1. Try it yourself</b><p class="muted">Write JavaScript in the browser. Your code runs against tests as you go.</p></div>
+      <div class="box"><b>2. Ask for the smallest hint</b><p class="muted">Nudge and Concept hints are free. Locate, Scaffold and Reveal use credits.</p></div>
+      <div class="box"><b>3. Finish without the answer</b><p class="muted">Most hints never show the solution, so you still do the thinking.</p></div>
+    </div>
+    <div class="box soft"><b>The five levels</b>
+      <div class="chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="pill g">Nudge - free</span><span class="pill g">Concept - free</span><span class="pill">Locate - 1 credit</span><span class="pill">Scaffold - 2 credits</span><span class="pill">Reveal - 3 credits</span></div></div>
+    <div class="note">Hero copy is the hypothesis in plain words (graded hints, not answers). Plan teaser links to pricing. No demand evidence yet [belief]; consider counting "Start free" and "See plans" clicks as the cheap demand test. Exercise language assumed JavaScript [assumption]. "Unstuck" is a working name.</div>
+  </div>
+  <div class="foot"><span>Terms</span><span>Refund policy</span><span>Privacy</span><span>Open source on GitHub</span></div>
+</section>
+
+<!-- 2 SIGNUP -->
+<section class="screen" id="signup" data-title="Sign up" data-trace="J2 / S6" data-path="critical">
+  <div class="trace"></div><div class="site-slot"></div>
+  <div class="pad" style="max-width:480px">
+    <h2>Create your account</h2><p class="muted">Free plan includes the free hint levels on every exercise.</p>
+    <div class="states" data-for="su"><button data-show="default" class="on">Default</button><button data-show="error">Error</button></div>
+    <div data-group="su" data-state="default" class="on"><label>Email</label><div class="input">you@example.com</div><label>Password</label><div class="input">At least 8 characters</div></div>
+    <div data-group="su" data-state="error"><label>Email</label><div class="input err">you@example</div><div class="errmsg">That email looks incomplete. Add the part after the @, like gmail.com.</div><label>Password</label><div class="input err">pass</div><div class="errmsg">Use at least 8 characters.</div></div>
+    <button class="btn block" data-go="exercises">Create account</button>
+    <p class="muted" style="font-size:13.5px">By creating an account you agree to the Terms and Privacy policy. We store your code so you can come back to it. You can delete it any time in Account.</p>
+    <div class="note">Auth method (email+password vs Google sign-in) is an open engineering choice; wireframe shows email only. Saved-code disclosure sits at signup because handoff asks Design to show what is stored (S8, S9).</div>
+  </div>
+</section>
+
+<!-- 3 EXERCISES -->
+<section class="screen" id="exercises" data-title="Exercise list" data-trace="J3 / S4" data-path="critical">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="crumb">Home &rsaquo; JavaScript basics</div>
+  <div class="pad">
+    <h2>JavaScript basics</h2><p class="muted">Pick an exercise. Each one has tests that check your code.</p>
+    <div class="states" data-for="ex"><button data-show="default" class="on">Default</button><button data-show="first" >First run</button></div>
+    <div data-group="ex" data-state="default" class="on">
+      <div class="row" data-go="workspace"><span><b>1. Count the vowels</b> <span class="pill w">In progress</span></span><span class="muted">Easy &rsaquo;</span></div>
+      <div class="row"><span>2. Reverse a string</span><span class="pill">Not started</span></div>
+      <div class="row"><span>3. Find the largest number</span><span class="pill">Not started</span></div>
+      <div class="row"><span>4. FizzBuzz</span><span class="pill">Not started</span></div>
+      <div class="row"><span>5. Is it a palindrome?</span><span class="pill">Not started</span></div>
+      <div class="row"><span>6. Sum an array</span><span class="pill">Not started</span></div>
+    </div>
+    <div data-group="ex" data-state="first">
+      <div class="box ok"><b>Start with exercise 1.</b><p>It takes about 10 minutes. If you get stuck, the hint panel on the right has a free level to try first.</p><button class="btn small" data-go="workspace">Open Count the vowels</button></div>
+      <div class="row"><span>2. Reverse a string</span><span class="pill">Locked until 1 is done</span></div>
+    </div>
+    <div class="note">6 to 8 exercises, each live only after its tests pass against its reference solution (S4). Titles here are sample content. Whether later exercises lock is an assumption; test whether a free-order list is less confusing.</div>
+  </div>
+</section>
+
+<!-- 4 WORKSPACE -->
+<section class="screen" id="workspace" data-title="Exercise workspace" data-trace="J4-J7 / S1, S2, S3, S5" data-path="critical">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="crumb">JavaScript basics &rsaquo; 1. Count the vowels</div>
+  <div class="ws">
+    <div class="side"><b>JavaScript basics</b><a class="on">1. Count the vowels</a><a>2. Reverse a string</a><a>3. Largest number</a><a>4. FizzBuzz</a><a>5. Palindrome</a><a>6. Sum an array</a></div>
+    <div>
+      <h3 style="margin-top:0">Count the vowels</h3>
+      <p>Write <code>countVowels(str)</code> so it returns how many vowels (a, e, i, o, u) the string has. Uppercase vowels count too.</p>
+      <pre class="code"><span style="opacity:.5">1</span>  function countVowels(str) {
+<span style="opacity:.5">2</span>    let count = 0;
+<span style="opacity:.5">3</span>    for (const ch of str) {
+<span class="hl"><span style="opacity:.5">4</span>      if ("aeiou".includes(ch)) count++;</span><span style="opacity:.5">5</span>    }
+<span style="opacity:.5">6</span>    return count;
+<span style="opacity:.5">7</span>  }</pre>
+      <button class="btn small" data-go="solved">Run tests</button><span class="muted" style="font-size:13px">Prototype: this simulates fixed code and passes.</span>
+      <div class="tests box soft"><b>Tests: 3 of 5 passing</b>
+        <div class="t-ok">&#10003; counts vowels in "banana"</div><div class="t-ok">&#10003; returns 0 for "rhythm"</div><div class="t-ok">&#10003; returns 0 for ""</div>
+        <div class="t-bad">&#10007; counts uppercase in "HELLO" (expected 2, got 0)</div><div class="t-bad">&#10007; counts mixed case in "Education" (expected 5, got 4)</div></div>
+    </div>
+    <div class="hints">
+      <b>Need a hint?</b><div class="muted" style="font-size:13.5px">Start small. Credits left: 12.</div>
+      <div class="states" data-for="h">
+        <button data-show="ladder" class="on">Ladder</button><button data-show="nudge">Nudge shown</button><button data-show="confirm">Locate: confirm</button><button data-show="locate">Locate shown</button><button data-show="leak">Leak fallback</button><button data-show="reveal">Reveal: confirm</button><button data-show="none">No credits</button>
+      </div>
+      <div data-group="h" data-state="ladder" class="on">
+        <div class="rung" data-sgo="h:nudge"><b>1 Nudge</b><span class="pill g">Free</span></div>
+        <div class="rung" data-sgo="h:nudge"><b>2 Concept</b><span class="pill g">Free</span></div>
+        <div class="rung" data-sgo="h:confirm"><b>3 Locate</b><span class="pill">1 credit</span></div>
+        <div class="rung" data-sgo="h:confirm"><b>4 Scaffold</b><span class="pill">2 credits</span></div>
+        <div class="rung" data-sgo="h:reveal"><b>5 Reveal</b><span class="pill w">3 credits</span></div>
+        <div class="note">Learner picks the level (handoff: hint held at the level chosen). Whether they can jump straight to Reveal is open; this wireframe allows it and the test will show whether people start low. Credits are counted by the app, not the model.</div>
+      </div>
+      <div data-group="h" data-state="nudge">
+        <div class="box ok"><b>Nudge</b> <span class="pill g">Free</span><p>Your function runs, but two tests fail. Look at what changes between "banana" and "HELLO". What is your check comparing each letter against?</p></div>
+        <div class="rung" data-sgo="h:confirm"><b>Need more? Locate</b><span class="pill">1 credit</span></div>
+        <div class="note">Reference solution is never in the model context at this level (S2). Copy shown is sample; real hints are generated.</div>
+      </div>
+      <div data-group="h" data-state="confirm">
+        <div class="modal"><b>Use 1 credit for a Locate hint?</b><p>It will point to the line with the problem, without showing the fix. You have 12 credits. After this you will have 11.</p>
+          <button class="btn small" data-sgo="h:locate">Use 1 credit</button><button class="btn small secondary" data-sgo="h:ladder">Not yet</button></div>
+        <div class="note">Cost is always shown before it is spent (KR moment J5). Locate, Scaffold and Reveal share this pattern with their own cost.</div>
+      </div>
+      <div data-group="h" data-state="locate">
+        <div class="box ok"><b>Locate</b> <span class="pill">1 credit used</span><p>The problem is on line 4, in the condition inside the loop. It only matches lowercase vowels.</p></div>
+        <p class="muted" style="font-size:13.5px">Credits left: 11. Try the fix, then run the tests.</p>
+      </div>
+      <div data-group="h" data-state="leak">
+        <div class="box warn"><b>Locate</b> <span class="pill">1 credit used</span><p>The problem is in the condition inside your loop, on line 4. Check which letters it can match.</p>
+          <p class="muted" style="font-size:13px">We swapped in our standard hint for this exercise because the first one was too close to the answer. It still counts as a Locate hint.</p></div>
+        <div class="note">Open question 6 from the handoff: what the learner sees when the leak check trips. Proposal here: show the stored fallback, say so in one sentence, charge the normal price. Alternative: do not charge when the fallback shows. Needs Amit's call, and a test of whether the message reads as honest or alarming.</div>
+      </div>
+      <div data-group="h" data-state="reveal">
+        <div class="modal"><b>Show the full solution for 3 credits?</b><p>You will see working code and an explanation. You have 12 credits, so you will have 9. Most learners finish faster with Locate or Scaffold first.</p>
+          <button class="btn small danger" data-sgo="h:ladder">Show solution</button><button class="btn small secondary" data-sgo="h:ladder">Keep trying</button></div>
+        <div class="note">"Most learners finish..." is unverified; do not ship that line without data [assumption]. The Reveal result screen is not drawn; it shows the solution text and marks the exercise "completed with Reveal" for the KR.</div>
+      </div>
+      <div data-group="h" data-state="none">
+        <div class="box bad"><b>No credits left this month</b><p>You can still use Nudge and Concept for free. Credits come back on 5 December, or you can add more with a plan.</p>
+          <button class="btn small" data-go="pricing">See plans</button></div>
+        <div class="rung on"><b>1 Nudge</b><span class="pill g">Free</span></div><div class="rung on"><b>2 Concept</b><span class="pill g">Free</span></div>
+        <div class="rung"><b>3 Locate</b><span class="pill">1 credit</span></div>
+        <div class="note">Riskiest-assumption path: out of credits, will they pay? Monthly refill date is sample. Open question 4: does a learner understand a monthly balance (article designed daily refill)? Reset date shown on purpose.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 SOLVED -->
+<section class="screen" id="solved" data-title="Exercise complete" data-trace="J7 / S5" data-path="critical">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="pad" style="max-width:640px">
+    <div class="box ok"><h2 style="margin-top:0">All 5 tests pass</h2><p>You finished "Count the vowels" using one Locate hint and no solution. 1 credit used.</p></div>
+    <button class="btn" data-go="exercises">Next exercise</button><button class="btn secondary" data-go="account">View my saved code</button>
+    <div class="note">KR moment: finished without Reveal (supporting KR). Summary names the highest hint level used so the learner can see their own progress. Your code is saved automatically (S8). Next/previous buttons follow the tutorial-site pattern.</div>
+  </div>
+</section>
+
+<!-- 6 PRICING -->
+<section class="screen" id="pricing" data-title="Plans" data-trace="J8 / S6" data-path="risk">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="pad">
+    <h2>Pick a plan</h2><p class="muted">Both plans give you the same five hint levels. The difference is how many credits you get each month.</p>
+    <div class="grid3">
+      <div class="box"><b>Free</b><p style="font-size:22px;margin:4px 0">Rs 0</p><p class="muted">Nudge and Concept hints on every exercise.</p><button class="btn secondary block">Current plan</button></div>
+      <div class="box ok"><b>Basic</b><p style="font-size:22px;margin:4px 0">Rs [price TBD] / month</p><p class="muted">[N] credits each month for Locate, Scaffold and Reveal.</p><button class="btn block" data-go="checkout">Choose Basic</button></div>
+      <div class="box"><b>Advanced</b><p style="font-size:22px;margin:4px 0">Rs [price TBD] / month</p><p class="muted">[N] credits each month. Best if you practise most days.</p><button class="btn block" data-go="checkout">Choose Advanced</button></div>
+    </div>
+    <p class="muted" style="font-size:13.5px">Credits refill on the same day each month. Unused credits do not carry over. Cancel any time.</p>
+    <div class="note">Prices and credit amounts are open (handoff questions 2 and 3); placeholders must be filled before any real test. "Do not carry over" and "cancel any time" are assumptions to confirm against the refund policy. Whether a free tier exists is an assumption (handoff lists only Basic and Advanced).</div>
+  </div>
+  <div class="foot"><span>Terms</span><span>Refund policy</span><span>Privacy</span></div>
+</section>
+
+<!-- 7 CHECKOUT -->
+<section class="screen" id="checkout" data-title="Checkout" data-trace="J9 / S7" data-path="risk">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="pad" style="max-width:560px">
+    <h2>Confirm your plan</h2>
+    <div class="box soft"><div class="row" style="border:0"><span>Basic plan, billed monthly</span><b>Rs [price TBD]</b></div></div>
+    <div class="states" data-for="co"><button data-show="default" class="on">Default</button><button data-show="declined">Card declined</button><button data-show="pending">Waiting for bank</button></div>
+    <div data-group="co" data-state="default" class="on">
+      <p class="muted">You will pay on Razorpay's secure page. Indian and international cards are accepted.</p>
+      <button class="btn block" data-go="checkout-done">Pay with Razorpay</button>
+    </div>
+    <div data-group="co" data-state="declined">
+      <div class="box bad"><b>Your card was declined</b><p>Your bank said no. Nothing was charged. Try another card, or ask your bank to allow international online payments.</p></div>
+      <button class="btn block" data-go="checkout-done">Try again</button>
+    </div>
+    <div data-group="co" data-state="pending">
+      <div class="box warn"><b>Waiting for your bank to confirm</b><p>This can take a minute. Please don't close this page or pay again.</p></div>
+    </div>
+    <p class="muted" style="font-size:13.5px">By paying you agree to the Terms and Refund policy.</p>
+    <div class="note">KR moment: paying subscriber. Razorpay hosted checkout, so card fields are not drawn here. International cards need activation and KYC [source: Razorpay docs]; foreign decline rate unknown, so the declined state matters. Plan switch/cancel screens not drawn (not in MVP list).</div>
+  </div>
+</section>
+
+<section class="screen" id="checkout-done" data-title="Payment done" data-trace="J9 / S7" data-path="risk">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="pad" style="max-width:560px">
+    <div class="box ok"><h2 style="margin-top:0">You're on Basic</h2><p>[N] credits added. Your balance is now [N]. Credits refill on 5 December.</p></div>
+    <button class="btn" data-go="workspace">Back to my exercise</button>
+    <div class="note">Returns the learner to where they were stuck. Sample date. Confirmation email and receipt come from Razorpay or the app; engineering to decide.</div>
+  </div>
+</section>
+
+<!-- 8 ACCOUNT -->
+<section class="screen" id="account" data-title="Account and saved code" data-trace="J10 / S6, S8" data-path="other">
+  <div class="trace"></div><div class="site-slot" data-credits="1"></div>
+  <div class="pad">
+    <h2>My account</h2>
+    <div class="grid2">
+      <div class="box"><b>Plan and credits</b><p>Free plan. <b>12 credits</b> left. Refills on 5 December.</p><button class="btn small" data-go="pricing">Change plan</button></div>
+      <div class="box"><b>What we store</b><p class="muted" style="font-size:14.5px">Your email, the latest code you wrote for each exercise, and how many credits you've used. We keep your code until you delete it [retention period TBD].</p></div>
+    </div>
+    <h3>My saved code</h3>
+    <div class="states" data-for="ac"><button data-show="default" class="on">Default</button><button data-show="empty">Empty</button></div>
+    <div data-group="ac" data-state="default" class="on">
+      <div class="row"><span>1. Count the vowels <span class="pill g">Completed</span></span><span><button class="btn small secondary">View</button><button class="btn small danger">Delete</button></span></div>
+    </div>
+    <div data-group="ac" data-state="empty"><div class="box soft">Nothing saved yet. Your code appears here as soon as you start an exercise.</div></div>
+    <button class="btn danger small">Delete all my code and account</button>
+    <div class="note">Retention length and delete rules are open (handoff question 5). Data-minimization principle from the article versus saving code (Amit confirmed saving); this screen makes the trade visible. Per-exercise Delete is assumed, confirm with Amit.</div>
+  </div>
+</section>
+
+<!-- 9 POLICIES -->
+<section class="screen" id="policies" data-title="Policy pages" data-trace="J1, J9 / S9" data-path="other">
+  <div class="trace"></div><div class="site-slot"></div>
+  <div class="pad" style="max-width:720px">
+    <h2>Terms, refund policy and privacy</h2>
+    <div class="box soft"><p><b>Terms of use</b></p><p class="muted">Sections: who can use Unstuck, acceptable use, credits and plans, termination, liability.</p></div>
+    <div class="box soft"><p><b>Refund and cancellation policy</b></p><p class="muted">Sections: how to cancel, when refunds are given, how long they take, contact.</p></div>
+    <div class="box soft"><p><b>Privacy policy</b></p><p class="muted">Sections: what we store (email, code, credits), why, retention, deletion, sharing with Razorpay and the AI provider, contact.</p></div>
+    <div class="note">Three static pages. Text will be generated in the build stage and needs review by someone who can judge legal text before launch [assumption]. Razorpay will likely ask for these URLs during activation.</div>
+  </div>
+</section>
+
+</main>
+</div>
+</div>
+
+<script>
+(function(){
+  var app=document.getElementById('app');
+  var screens=[].slice.call(document.querySelectorAll('.screen'));
+  var list=document.getElementById('list');
+  var groups={critical:'Critical path',risk:'Riskiest assumption: will they pay?',other:'Other'};
+  Object.keys(groups).forEach(function(g){
+    var m=screens.filter(function(s){return (s.dataset.path||'other')===g});
+    if(!m.length)return;
+    var h=document.createElement('div');h.className='grp';h.textContent=groups[g];list.appendChild(h);
+    m.forEach(function(s){var a=document.createElement('a');a.href='#'+s.id;a.innerHTML=s.dataset.title+'<small>'+(s.dataset.trace||'NO TRACE')+'</small>';list.appendChild(a)});
+  });
+  screens.forEach(function(s){
+    var t=s.querySelector('.trace');t.textContent='Traces to: '+(s.dataset.trace||'MISSING');
+    var slot=s.querySelector('.site-slot');
+    var nav='<div class="site"><span class="brand" data-go="landing">Unstuck</span><a data-go="exercises">Exercises</a><a data-go="pricing">Plans</a><a data-go="policies">Policies</a><span class="sp"></span>'+
+      (slot.dataset.credits?'<span class="credits">12 credits</span><a data-go="account">My account</a>':'<a data-go="signup">Sign up</a>')+'</div>';
+    slot.outerHTML=nav;
+  });
+  function show(id){
+    var t=document.getElementById(id)||screens[0];
+    screens.forEach(function(s){s.classList.toggle('on',s===t)});
+    [].forEach.call(list.querySelectorAll('a'),function(a){a.classList.toggle('on',a.getAttribute('href')==='#'+t.id)});
+  }
+  function setState(grp,st){
+    document.querySelectorAll('.states[data-for="'+grp+'"] button').forEach(function(b){b.classList.toggle('on',b.dataset.show===st)});
+    document.querySelectorAll('[data-group="'+grp+'"]').forEach(function(el){el.classList.toggle('on',el.dataset.state===st)});
+  }
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1))});
+  document.addEventListener('click',function(e){
+    var sg=e.target.closest('[data-sgo]');
+    if(sg){var p=sg.dataset.sgo.split(':');setState(p[0],p[1]);return;}
+    var go=e.target.closest('[data-go]');
+    if(go){location.hash=go.dataset.go;return;}
+    var st=e.target.closest('.states button');
+    if(st)setState(st.parentNode.dataset.for,st.dataset.show);
+  });
+  function tog(id,cls){var b=document.getElementById(id);b.addEventListener('click',function(){var on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);app.classList.toggle(cls,on)})}
+  tog('tNotes','notes');tog('tProto','proto');
+  document.getElementById('tReset').addEventListener('click',function(){location.hash=screens[0].id;show(screens[0].id)});
+  show(location.hash.slice(1));
+})();
+</script>
