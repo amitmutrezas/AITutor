@@ -124,6 +124,52 @@ describe("R2: assertion tampering", () => {
   });
 });
 
+describe("R2: deepEqual and forged results", () => {
+  async function eq(a: string, b: string): Promise<boolean> {
+    const { send } = bootWorker();
+    const msg = await send("", `test('t', () => { assert.deepEqual(${a}, ${b}); });`);
+    return msg.results![0].passed;
+  }
+  it("R2: deepEqual ignores key order", async () => {
+    expect(await eq("{a:1,b:2}", "{b:2,a:1}")).toBe(true);
+  });
+  it("R2: deepEqual treats missing and undefined as different", async () => {
+    expect(await eq("{a:1}", "{a:1,b:undefined}")).toBe(false);
+    expect(await eq("[1,,3]", "[1,undefined,3]")).toBe(false);
+  });
+  it("R2: deepEqual handles nested, arrays, NaN, Date, Map, Set, cycles", async () => {
+    expect(await eq("{x:[1,{y:[2]}]}", "{x:[1,{y:[2]}]}")).toBe(true);
+    expect(await eq("{x:[1,{y:[2]}]}", "{x:[1,{y:[3]}]}")).toBe(false);
+    expect(await eq("[1,2]", "[2,1]")).toBe(false);
+    expect(await eq("[1,2]", "[1,2,3]")).toBe(false);
+    expect(await eq("NaN", "NaN")).toBe(true);
+    expect(await eq("[NaN]", "[NaN]")).toBe(true);
+    expect(await eq("new Date(5)", "new Date(5)")).toBe(true);
+    expect(await eq("new Date(5)", "new Date(6)")).toBe(false);
+    expect(await eq("new Map([[1,{a:1}]])", "new Map([[1,{a:1}]])")).toBe(true);
+    expect(await eq("new Map([[1,2]])", "new Map([[1,3]])")).toBe(false);
+    expect(await eq("new Set([1,2])", "new Set([2,1])")).toBe(true);
+    expect(await eq("new Set([1,2])", "new Set([1,3])")).toBe(false);
+    expect(await eq("1", "'1'")).toBe(false);
+    const cyc = "(()=>{const a={};a.s=a;return a})()";
+    expect(await eq(cyc, cyc)).toBe(true);
+  });
+  it("R2: a top-level return of fake passing results does not pass", async () => {
+    const { send } = bootWorker();
+    const msg = await send(
+      "return [{name:'fake',passed:true,message:''}];",
+      "test('real', () => { assert.equal(1, 2); });",
+    );
+    expect(msg.type).toBe("error");
+    expect(msg.results).toBeUndefined();
+  });
+  it("R2: zero registered tests is an error, not a pass", async () => {
+    const { send } = bootWorker();
+    const msg = await send("var x = 1;", "var y = 2;");
+    expect(msg.type).toBe("error");
+  });
+});
+
 describe("R2: result shaping", () => {
   it("R2: pass/fail per test with the failing assertion message", async () => {
     const { send } = bootWorker();

@@ -24,19 +24,68 @@ function makeTestApi() {
     if (!Object.is(a, b)) fail(message || "Expected " + show(b) + " but got " + show(a));
   };
   assert.deepEqual = function (a, b, message) {
-    var x = show(a), y = show(b);
-    if (x !== y) fail(message || "Expected " + y + " but got " + x);
+    if (!deepEq(a, b, [])) fail(message || "Expected " + show(b) + " but got " + show(a));
   };
+  // Structural comparison: primitives via Object.is, arrays element-wise, plain objects by own
+  // enumerable key set (order ignored, missing differs from undefined), Date, Map, Set, NaN.
+  // seen holds [a, b] pairs being compared so cycles terminate.
+  function deepEq(a, b, seen) {
+    if (Object.is(a, b)) return true;
+    if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+    for (var s = 0; s < seen.length; s++) if (seen[s][0] === a && seen[s][1] === b) return true;
+    seen.push([a, b]);
+    var tag = Object.prototype.toString.call(a);
+    if (tag !== Object.prototype.toString.call(b)) return false;
+    if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+    var i;
+    if (tag === "[object Date]") return Object.is(a.getTime(), b.getTime());
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) return false;
+      for (i = 0; i < a.length; i++) {
+        if ((i in a) !== (i in b)) return false;
+        if (!deepEq(a[i], b[i], seen)) return false;
+      }
+      return true;
+    }
+    if (tag === "[object Map]") {
+      if (a.size !== b.size) return false;
+      var ok = true;
+      a.forEach(function (v, k) { if (!b.has(k) || !deepEq(v, b.get(k), seen)) ok = false; });
+      return ok;
+    }
+    if (tag === "[object Set]") {
+      if (a.size !== b.size) return false;
+      var found = true;
+      a.forEach(function (v) {
+        if (b.has(v)) return;
+        var match = false;
+        b.forEach(function (w) { if (!match && deepEq(v, w, seen.slice())) match = true; });
+        if (!match) found = false;
+      });
+      return found;
+    }
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (i = 0; i < ka.length; i++) {
+      if (!Object.prototype.hasOwnProperty.call(b, ka[i])) return false;
+      if (!deepEq(a[ka[i]], b[ka[i]], seen)) return false;
+    }
+    return true;
+  }
   function show(v) {
     if (v === undefined) return "undefined";
     if (typeof v === "function") return "[function]";
-    try { return JSON.stringify(v); } catch (e) { return String(v); }
+    if (typeof v === "number") return Object.is(v, -0) ? "-0" : String(v);
+    if (v instanceof Map) return "Map(" + show(Array.from(v.entries())) + ")";
+    if (v instanceof Set) return "Set(" + show(Array.from(v.values())) + ")";
+    try { return JSON.stringify(v, function (k, x) { return x === undefined ? "undefined" : (typeof x === "number" && !isFinite(x) ? String(x) : x); }); } catch (e) { return String(v); }
   }
   function test(name, fn) { tests.push({ name: String(name), fn: fn }); }
   function describeError(e) {
     return e && e.message ? String(e.message) : String(e);
   }
   async function run() {
+    if (tests.length === 0) throw new Error("No tests were registered by the exercise");
     var results = [];
     for (var i = 0; i < tests.length; i++) {
       try { await tests[i].fn(); results.push({ name: tests[i].name, passed: true, message: "" }); }

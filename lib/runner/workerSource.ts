@@ -35,15 +35,20 @@ ${TEST_API_SOURCE}
       // mutating them, they are frozen) cannot change what the tests call. Not a trust boundary:
       // results are never trusted server side.
       var hidden = "__h_" + nonce.replace(/[^a-z0-9]/gi, "");
-      var body = String(data.code) + "\\n;\\n" + "return " + hidden +
-        ".run(function (test, assert) {\\n" + String(data.tests) + "\\n}, " + hidden + ");";
+      // The function's own return value is ignored: results can only come from harness.run.
+      var body = String(data.code) + "\\n;\\n" + hidden +
+        ".run(function (test, assert) {\\n" + String(data.tests) + "\\n});";
       // Blocked names are also bound as parameters, so learner code sees the stubs even if a
       // global could not be redefined.
       var fn = Function.apply(null, [hidden, "test", "assert"].concat(blocked, [body]));
+      var pending = null;
       var harness = Object.freeze({
-        run: function (testsFn) { testsFn(api.test, api.assert); return api.run(); },
+        run: function (testsFn) { testsFn(api.test, api.assert); pending = api.run(); },
       });
-      var results = await fn.apply(null, [harness, api.test, api.assert].concat(stubs));
+      await fn.apply(null, [harness, api.test, api.assert].concat(stubs));
+      // A top-level return in learner code skips harness.run, so no results exist.
+      if (!pending) throw new Error("Your code returned before the tests could run");
+      var results = await pending;
       post({ type: "done", nonce: nonce, results: results });
     } catch (e) {
       post({ type: "error", nonce: nonce, message: e && e.message ? String(e.message) : String(e) });
