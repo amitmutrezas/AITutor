@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runTests } from "./runTests.ts";
 import { exerciseSchema, toExerciseForHint } from "./schema.ts";
-import { nextStatus, verifyExercise } from "./verify.ts";
+import { isVerifyFailure, nextStatus, verifyExercise } from "./verify.ts";
 import { alreadySolved, brokenReference, leakyHint } from "./__fixtures__/broken-exercise.ts";
 
 const dir = join(process.cwd(), "content", "exercises");
@@ -69,5 +69,55 @@ describe("E2: runTests", () => {
   it("E2: code cannot reach host globals", () => {
     const { results } = runTests({ code: "", tests: "test('no process',()=>assert(typeof process==='undefined'));" });
     expect(results[0]?.passed).toBe(true);
+  });
+});
+
+describe("E2: status persistence rules", () => {
+  it("E2: a live or verified exercise that fails verification is a failure; a draft is not", () => {
+    expect(isVerifyFailure("live", false)).toBe(true);
+    expect(isVerifyFailure("verified", false)).toBe(true);
+    expect(isVerifyFailure("draft", false)).toBe(false);
+    expect(isVerifyFailure("verified", true)).toBe(false);
+  });
+});
+
+describe("E2: assert.deepEqual is structural", () => {
+  const eq = (a: string, b: string) => runTests({ code: "", tests: `test('t',()=>assert.deepEqual(${a},${b}));` }).results[0]?.passed;
+  it("E2: key order is ignored", () => {
+    expect(eq("{a:1,b:2}", "{b:2,a:1}")).toBe(true);
+  });
+  it("E2: a missing key differs from undefined", () => {
+    expect(eq("{a:1}", "{a:1,b:undefined}")).toBe(false);
+    expect(eq("{a:undefined}", "{}")).toBe(false);
+  });
+  it("E2: nested structures compare deeply", () => {
+    expect(eq("{a:[1,{b:[2]}]}", "{a:[1,{b:[2]}]}")).toBe(true);
+    expect(eq("{a:[1,{b:[2]}]}", "{a:[1,{b:[3]}]}")).toBe(false);
+  });
+  it("E2: NaN equals NaN, but null differs from undefined and 1 from '1'", () => {
+    expect(eq("NaN", "NaN")).toBe(true);
+    expect(eq("[NaN]", "[NaN]")).toBe(true);
+    expect(eq("null", "undefined")).toBe(false);
+    expect(eq("1", "'1'")).toBe(false);
+  });
+  it("E2: array holes differ from undefined", () => {
+    expect(eq("[1,,3]", "[1,undefined,3]")).toBe(false);
+    expect(eq("[1,2]", "[1,2,3]")).toBe(false);
+  });
+  it("E2: Date, Map and Set compare by content", () => {
+    expect(eq("new Date(5)", "new Date(5)")).toBe(true);
+    expect(eq("new Date(5)", "new Date(6)")).toBe(false);
+    expect(eq("new Map([[1,{a:1}]])", "new Map([[1,{a:1}]])")).toBe(true);
+    expect(eq("new Map([[1,2]])", "new Map([[1,3]])")).toBe(false);
+    expect(eq("new Set([1,2])", "new Set([2,1])")).toBe(true);
+    expect(eq("new Set([1])", "new Set([2])")).toBe(false);
+  });
+  it("E2: prototypes must match", () => {
+    expect(eq("[]", "{}")).toBe(false);
+    expect(eq("Object.create(null)", "{}")).toBe(false);
+  });
+  it("E2: cyclic structures do not hang", () => {
+    const code = "var a={}; a.self=a; var b={}; b.self=b;";
+    expect(runTests({ code, tests: "test('t',()=>assert.deepEqual(a,b));" }).results[0]?.passed).toBe(true);
   });
 });

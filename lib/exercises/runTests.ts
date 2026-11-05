@@ -25,7 +25,42 @@ function test(name, fn) {
 }
 function assert(cond, msg) { if (!cond) throw new Error(msg || "assertion failed"); }
 assert.equal = function (a, b, msg) { if (a !== b) throw new Error(msg || "expected " + __show(b) + " but got " + __show(a)); };
-assert.deepEqual = function (a, b, msg) { if (__show(a) !== __show(b)) throw new Error(msg || "expected " + __show(b) + " but got " + __show(a)); };
+assert.deepEqual = function (a, b, msg) { if (!__eq(a, b, [])) throw new Error(msg || "expected " + __show(b) + " but got " + __show(a)); };
+function __eq(a, b, seen) {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  for (var i = 0; i < seen.length; i++) { if (seen[i][0] === a && seen[i][1] === b) return true; }
+  seen.push([a, b]);
+  if (a instanceof Date) return Object.is(a.getTime(), b.getTime());
+  if (a instanceof Map) {
+    if (a.size !== b.size) return false;
+    var ok = true;
+    a.forEach(function (v, k) { if (ok && (!b.has(k) || !__eq(v, b.get(k), seen))) ok = false; });
+    return ok;
+  }
+  if (a instanceof Set) {
+    if (a.size !== b.size) return false;
+    var okSet = true;
+    a.forEach(function (v) { if (okSet && !b.has(v)) okSet = false; });
+    return okSet;
+  }
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (var j = 0; j < a.length; j++) {
+      if ((j in a) !== (j in b)) return false;
+      if ((j in a) && !__eq(a[j], b[j], seen)) return false;
+    }
+  }
+  var ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (var k = 0; k < ka.length; k++) {
+    var key = ka[k];
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !Object.prototype.propertyIsEnumerable.call(b, key)) return false;
+    if (!__eq(a[key], b[key], seen)) return false;
+  }
+  return true;
+}
 `;
 
 function errorMessage(e: unknown): string {

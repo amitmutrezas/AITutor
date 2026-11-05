@@ -46,3 +46,8 @@ export function nextStatus(current: Exercise["status"], ok: boolean): Exercise["
   if (current === "live") return "live";
   return ok ? "verified" : "draft";
 }
+
+/** E2: a verified or live exercise that fails verification is an error (CI fails). Drafts may fail. */
+export function isVerifyFailure(current: Exercise["status"], ok: boolean): boolean {
+  return !ok && (current === "live" || current === "verified");
+}
