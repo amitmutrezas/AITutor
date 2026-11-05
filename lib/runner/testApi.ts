@@ -27,6 +27,15 @@ function makeTestApi() {
   assert.deepEqual = function (a, b, message) {
     if (!deepEq(a, b, [])) fail(message || "Expected " + show(b) + " but got " + show(a));
   };
+  // Captured before learner code runs. Date detection is a brand check (getTime throws on
+  // non-Dates) plus a prototype check; Symbol.toStringTag is never trusted.
+  var dateGetTime = Date.prototype.getTime;
+  var datePrototype = Date.prototype;
+  var ownKeys = Reflect.ownKeys;
+  function isDate(v) {
+    if (Object.getPrototypeOf(v) !== datePrototype) return false;
+    try { dateGetTime.call(v); return true; } catch (e) { return false; }
+  }
   var UNSUPPORTED = "deepEqual supports plain data only (objects, arrays, primitives, Date); " +
     "compare Map/Set/cycles/class instances manually";
   // JSON-like data only; anything else throws (fails closed). Primitives via Object.is (NaN
@@ -38,7 +47,10 @@ function makeTestApi() {
     if (t === "function" || t === "symbol") throw new Error(UNSUPPORTED);
     if (t !== "object" || v === null) return;
     if (stack.indexOf(v) !== -1) throw new Error(UNSUPPORTED);
-    if (Array.isArray(v) || Object.prototype.toString.call(v) === "[object Date]") return;
+    // Symbol-keyed own properties are invisible to Object.keys, so reject them outright.
+    var keys = ownKeys(v);
+    for (var k = 0; k < keys.length; k++) if (typeof keys[k] === "symbol") throw new Error(UNSUPPORTED);
+    if (Array.isArray(v) || isDate(v)) return;
     var proto = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null) throw new Error(UNSUPPORTED);
   }
@@ -49,9 +61,8 @@ function makeTestApi() {
     if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
       return Object.is(a, b);
     }
-    var aDate = Object.prototype.toString.call(a) === "[object Date]";
-    var bDate = Object.prototype.toString.call(b) === "[object Date]";
-    if (aDate || bDate) return aDate && bDate && Object.is(a.getTime(), b.getTime());
+    var aDate = isDate(a), bDate = isDate(b);
+    if (aDate || bDate) return aDate && bDate && Object.is(dateGetTime.call(a), dateGetTime.call(b));
     var aArr = Array.isArray(a), i;
     if (aArr !== Array.isArray(b)) return false;
     stack.push(a, b);
