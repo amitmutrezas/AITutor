@@ -14,8 +14,9 @@ const json = (body: unknown, status: number) => Response.json(body, { status });
 
 /** Creates a Razorpay subscription. The client never decides a plan change: only the webhook does (P1). */
 export async function handleSubscribe(request: Request, deps: SubscribeDeps): Promise<Response> {
-  // TODO(M5): replace the x-user-id header with the real signed-in session user.
-  const userId = request.headers.get("x-user-id");
+  // TODO(M5): replace the x-user-id header with the real signed-in session user. Until then the
+  // header is trusted only outside production, so production fails closed with a generic 401.
+  const userId = process.env.NODE_ENV !== "production" ? request.headers.get("x-user-id") : null;
   if (!userId) return json({ error: "Sign in required" }, 401);
 
   let raw: unknown;

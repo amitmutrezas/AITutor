@@ -1,9 +1,10 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PAYMENT_PLANS } from "./plans";
 import { verifySubscriptionCheckoutSignature, verifyWebhookSignature } from "./signature";
 import { subscribeBody, handleSubscribe } from "./subscribe";
-import { InMemoryPaymentStore } from "./store";
+import { InMemoryPaymentStore, getPaymentStore } from "./store";
+import { POST as webhookRoute } from "../../app/api/razorpay/webhook/route";
 import { handleRazorpayWebhook } from "./webhook";
 
 const SECRET = "test_webhook_secret_not_real";
@@ -76,9 +77,24 @@ describe("P2: webhook handler", () => {
     expect(res.status).toBe(400);
   });
 
-  it("P2: valid event updates plan and grants credits once; replayed event is ignored", async () => {
+  it("P2: activated updates status only and grants no credits", async () => {
     const store = new InMemoryPaymentStore();
-    const body = event("subscription.activated");
+    const res = await handleRazorpayWebhook(hook(event("subscription.activated")), deps(store));
+    expect(res.status).toBe(200);
+    expect(store.subscriptions.get("u1")?.status).toBe("active");
+    expect(store.credits.size).toBe(0);
+  });
+
+  it("C4: renewal resets credits to the allowance, no rollover", async () => {
+    const store = new InMemoryPaymentStore();
+    store.credits.set("u1", 20);
+    await handleRazorpayWebhook(hook(event("subscription.charged"), { id: "e1" }), deps(store));
+    expect(store.credits.get("u1")).toBe(PAYMENT_PLANS.basic.monthlyCredits);
+  });
+
+  it("P2: charged updates plan and grants credits once; replayed event is ignored", async () => {
+    const store = new InMemoryPaymentStore();
+    const body = event("subscription.charged");
     expect((await handleRazorpayWebhook(hook(body), deps(store))).status).toBe(200);
     expect(store.subscriptions.get("u1")).toEqual({
       planId: "basic",
@@ -91,11 +107,11 @@ describe("P2: webhook handler", () => {
     expect(store.credits.get("u1")).toBe(PAYMENT_PLANS.basic.monthlyCredits);
   });
 
-  it("P2: subscription.charged with a new event id grants another month", async () => {
+  it("C4: a second charge with a new event id resets, not accumulates", async () => {
     const store = new InMemoryPaymentStore();
-    await handleRazorpayWebhook(hook(event("subscription.activated"), { id: "e1" }), deps(store));
+    await handleRazorpayWebhook(hook(event("subscription.charged"), { id: "e1" }), deps(store));
     await handleRazorpayWebhook(hook(event("subscription.charged"), { id: "e2" }), deps(store));
-    expect(store.credits.get("u1")).toBe(PAYMENT_PLANS.basic.monthlyCredits * 2);
+    expect(store.credits.get("u1")).toBe(PAYMENT_PLANS.basic.monthlyCredits);
   });
 
   it("P2: cancelled and halted update status without granting credits", async () => {
@@ -196,5 +212,34 @@ describe("P4: plan config", () => {
       expect(Number.isInteger(p.monthlyCredits)).toBe(true);
       expect(p.pricePaise).toBeNull();
     }
+  });
+});
+
+describe("N1: fail closed in production until M5", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("N1: x-user-id is honoured outside production and ignored in production", async () => {
+    const req = () =>
+      new Request("http://x/s", {
+        method: "POST",
+        headers: { "x-user-id": "u1" },
+        body: JSON.stringify({ planId: "gold" }),
+      });
+    const base = { keyId: "k", keySecret: "s", env };
+    vi.stubEnv("NODE_ENV", "development");
+    expect((await handleSubscribe(req(), base)).status).toBe(400); // got past auth
+    vi.stubEnv("NODE_ENV", "production");
+    const res = await handleSubscribe(req(), base);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Sign in required" });
+  });
+
+  it("N1: webhook route returns generic 503 in production and changes nothing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAZORPAY_WEBHOOK_SECRET", SECRET);
+    expect(getPaymentStore()).toBeNull();
+    const res = await webhookRoute(hook(event("subscription.charged")));
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("");
   });
 });

@@ -12,7 +12,7 @@ export interface PaymentStore {
     status: SubscriptionStatus,
     razorpaySubscriptionId: string,
   ): Promise<void>;
-  /** Adds the plan's monthly credits (integer) to the user's balance. */
+  /** RESETS the balance to the plan's monthly allowance (integer). No rollover (C4). */
   grantMonthlyCredits(userId: string, planId: PlanId): Promise<void>;
 }
 
@@ -43,21 +43,20 @@ export class InMemoryPaymentStore implements PaymentStore {
     this.subscriptions.set(userId, { planId, status, razorpaySubscriptionId });
   }
   async grantMonthlyCredits(userId: string, planId: PlanId) {
-    this.credits.set(
-      userId,
-      (this.credits.get(userId) ?? 0) + PAYMENT_PLANS[planId].monthlyCredits,
-    );
+    this.credits.set(userId, PAYMENT_PLANS[planId].monthlyCredits);
   }
 }
 
 let defaultStore: PaymentStore | undefined;
 
 /**
- * TODO(M5): return the Supabase-backed implementation. Plan changes and credit grants must go
- * through lib/credits inside one database transaction together with markProcessed, so a crash
- * cannot grant credits twice (POLICY 3.1, 3.3). Until then, state is in-memory and non-durable.
+ * Returns null in production: the in-memory store is not durable or transactional, so callers
+ * must fail closed (generic 503) rather than lose or double-apply money events.
+ * TODO(M5): return the Supabase-backed store here. Plan change, credit reset and markProcessed
+ * must happen in one database transaction via lib/credits (POLICY 3.1, 3.3).
  */
-export function getPaymentStore(): PaymentStore {
+export function getPaymentStore(): PaymentStore | null {
+  if (process.env.NODE_ENV === "production") return null;
   defaultStore ??= new InMemoryPaymentStore();
   return defaultStore;
 }

@@ -77,6 +77,9 @@ export async function handleRazorpayWebhook(
 
   switch (event) {
     case "subscription.activated":
+      // Status only: credits come from the first subscription.charged, one per charge.
+      await deps.store.setSubscription(userId, planId, "active", sub.id);
+      break;
     case "subscription.charged":
       await deps.store.setSubscription(userId, planId, "active", sub.id);
       await deps.store.grantMonthlyCredits(userId, planId);
