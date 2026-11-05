@@ -21,6 +21,9 @@ else
 fi
 expect 2 $H/production-gate.sh '{"tool_input":{"command":"vercel deploy --prod"}}'
 expect 2 $H/production-gate.sh '{"tool_input":{"command":"npm run deploy:production"}}'
+expect 2 $H/production-gate.sh '{"tool_input":{"command":"vercel promote dpl_123 --yes"}}'
+expect 2 $H/production-gate.sh '{"tool_input":{"command":"npx vercel env pull"}}'
+expect 2 $H/production-gate.sh '{"tool_input":{"command":"vercel alias set a b"}}'
 expect 0 $H/production-gate.sh '{"tool_input":{"command":"pnpm test"}}'
 (RELEASE_APPROVAL=amit expect 0 $H/production-gate.sh '{"tool_input":{"command":"vercel deploy --prod"}}')
 expect 0 $H/protect-paths.sh "{\"tool_input\":{\"file_path\":\"$PWD/.env.example\"}}"
