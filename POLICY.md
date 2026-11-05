@@ -48,6 +48,8 @@ Agents may not change these without the user asking for that change in the curre
 
 `intent/PLAN.md` may be edited by agents only to record approved changes.
 
+Enforcement has three layers. The edit hooks cover Claude's file tools. A best-effort Bash hook (`bash-paths.sh`) blocks shell commands that look like writes to these paths, but a determined command can get around a pattern match. The backstop that cannot be bypassed from an agent session is CI: the `protected-paths` job fails a PR that touches these paths without the `policy-approved` label (only Amit adds it) or touches application code while PLAN.md is not APPROVED, and CODEOWNERS plus branch protection require a human approval.
+
 ## 7. Approvals that always need Amit
 
 - Approving `intent/PLAN.md` (starts implementation).

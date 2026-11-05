@@ -10,7 +10,8 @@ if printf '%s' "$added" | grep -Eqi "$pattern"; then
   echo "Blocked: staged changes look like they contain a secret (POLICY.md 4.1). Remove it and use an environment variable." >&2
   exit 2
 fi
-if git diff --cached --name-only | grep -Eq '(^|/)\.env($|\.)' && ! git diff --cached --name-only | grep -Eq '\.env\.example$'; then
+# Filter .env.example out first, so co-staging it cannot hide a real env file.
+if git diff --cached --name-only | grep -Ev '(^|/)\.env\.example$' | grep -Eq '(^|/)\.env($|\.)'; then
   echo "Blocked: .env file staged (POLICY.md 4.1). Only .env.example may be committed." >&2
   exit 2
 fi

@@ -23,6 +23,36 @@ jobs:
       - name: Settings is valid JSON
         run: jq . .claude/settings.json >/dev/null
 
+  protected-paths:
+    name: Protected paths and plan gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          # Bootstrap: the PR that introduces the guards cannot be gated by them.
+          if ! git cat-file -e "$BASE_SHA:.claude/hooks/protect-paths.sh" 2>/dev/null; then
+            echo "Base has no guards yet (bootstrap PR). Skipping."; exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
+          protected='^(POLICY\.md|REVIEW\.md|intent/INTENT\.md|intent/SPEC\.md|\.claude/settings\.json|\.claude/hooks/|\.github/workflows/|\.github/CODEOWNERS|app/\(legal\)/|db/migrations/)'
+          if echo "$changed" | grep -Eq "$protected"; then
+            case ",$LABELS," in
+              *,policy-approved,*) echo "Protected paths changed; label policy-approved present." ;;
+              *) echo "Protected paths changed without the policy-approved label (added by Amit):"; echo "$changed" | grep -E "$protected"; exit 1 ;;
+            esac
+          fi
+          appcode='^(app/|lib/|components/|content/|scripts/|tests/|e2e/|db/|src/|public/|package\.json|next\.config)'
+          if echo "$changed" | grep -Eq "$appcode" && ! grep -Eq '^Status:[[:space:]]*\**APPROVED' intent/PLAN.md; then
+            echo "Application code changed but intent/PLAN.md is not APPROVED."; exit 1
+          fi
+
   app:
     name: Typecheck, lint, test, build
     runs-on: ubuntu-latest

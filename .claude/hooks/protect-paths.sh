@@ -10,7 +10,15 @@ file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.noteb
 [ -z "$file" ] && exit 0
 rel="${file#"$root"/}"
 
-protected='^(POLICY\.md|REVIEW\.md|intent/INTENT\.md|intent/SPEC\.md|\.claude/settings\.json|\.claude/hooks/|\.github/workflows/|\.github/CODEOWNERS|app/\(legal\)/|db/migrations/|\.env)'
+protected='^(POLICY\.md|REVIEW\.md|intent/INTENT\.md|intent/SPEC\.md|\.claude/settings\.json|\.claude/hooks/|\.github/workflows/|\.github/CODEOWNERS|app/\(legal\)/|db/migrations/)'
+# Real env files are protected; the committed .env.example may be edited.
+base="$(basename "$rel")"
+case "$base" in
+  .env.example) ;;
+  .env|.env.*)
+    echo "Blocked: $rel is an env file (POLICY.md 4.1). Only .env.example may be edited." >&2
+    exit 2 ;;
+esac
 if printf '%s' "$rel" | grep -Eq "$protected" && [ "${ALLOW_PROTECTED:-}" != "1" ]; then
   echo "Blocked: $rel is a protected path (POLICY.md section 6). Ask the user to approve this change, then a human can set ALLOW_PROTECTED=1 or edit it directly." >&2
   exit 2

@@ -3,8 +3,9 @@
 set -euo pipefail
 repo="${GITHUB_REPOSITORY:-amitmutrezas/AITutor}"
 since="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
-prs="$(gh api -X GET "repos/$repo/pulls" -f state=closed -f per_page=100 --paginate \
-  | jq --arg since "$since" '[.[] | select(.merged_at != null and .merged_at >= $since)]')"
+# --slurp wraps every page in one outer array, so flatten before filtering.
+prs="$(gh api -X GET "repos/$repo/pulls" -f state=closed -f per_page=100 --paginate --slurp \
+  | jq --arg since "$since" '[.[][] | select(.merged_at != null and .merged_at >= $since)]')"
 n="$(jq length <<<"$prs")"
 echo "## PR loop metrics, week to $(date -u +%F)"
 echo
@@ -17,7 +18,7 @@ jq -r '
 echo
 echo "Per PR: review comments and Important findings (from the Codex summary line 'Important: N, Nits: M')"
 for num in $(jq -r '.[].number' <<<"$prs"); do
-  comments="$(gh api "repos/$repo/pulls/$num/comments" --paginate | jq length)"
-  tally="$(gh api "repos/$repo/issues/$num/comments" --paginate | jq -r '[.[].body | capture("Important: (?<i>[0-9]+), Nits: (?<n>[0-9]+)")?] | last // empty | "Important \(.i), Nits \(.n)"')"
+  comments="$(gh api "repos/$repo/pulls/$num/comments" --paginate --slurp | jq '[.[][]] | length')"
+  tally="$(gh api "repos/$repo/issues/$num/comments" --paginate --slurp | jq -r '[.[][].body | capture("Important: (?<i>[0-9]+), Nits: (?<n>[0-9]+)")?] | last // empty | "Important \(.i), Nits \(.n)"')"
   echo "- #$num: $comments inline comments; ${tally:-no review tally found}"
 done
