@@ -22,6 +22,28 @@ describe("M5 migration 0002", () => {
     expect(m2).toMatch(/where user_id = p_user and balance >= p_cost/);
   });
 
+  it("3.2: reservations have ids and statuses and a service-role reconcile releases stale ones", () => {
+    expect(m2).toMatch(/create table public\.credit_reservations/);
+    expect(m2).toMatch(/status in \('reserved', 'settled', 'released'\)/);
+    expect(m2).toMatch(/create function public\.credits_reconcile/);
+    expect(m2).toMatch(/for update skip locked/);
+    expect(m2).toMatch(/'credits_reconcile', 'credits_settle_hint'/);
+  });
+
+  it("C3: settle writes the hint log and marks the reservation settled in one function", () => {
+    const fn = m2.match(/create function public\.credits_settle_hint[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(fn).toMatch(/insert into public\.hint_log/);
+    expect(fn).toMatch(/set status = 'settled'/);
+  });
+
+  it("P2: an unknown subscription is looked up before the event id is claimed", () => {
+    const fn = m2.match(/create function public\.payments_apply_event[\s\S]*?end \$\$;/)?.[0] ?? "";
+    const lookup = fn.indexOf("select * into v_row");
+    const claim = fn.lastIndexOf("insert into public.payment_events");
+    expect(lookup).toBeGreaterThan(0);
+    expect(lookup).toBeLessThan(claim);
+  });
+
   it("P2: processed webhook events are keyed by event id and the table is service-role only", () => {
     expect(m2).toMatch(/event_id text primary key/);
     expect(m2).toMatch(/on conflict \(event_id\) do nothing/);

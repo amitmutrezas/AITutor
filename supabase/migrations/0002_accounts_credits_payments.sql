@@ -57,33 +57,106 @@ language sql security definer set search_path = public as $$
   select coalesce((select balance from public.credit_balances where user_id = p_user), 0);
 $$;
 
--- Takes p_cost credits if the balance covers it. Returns false and changes nothing otherwise (C2).
-create function public.credits_reserve(p_user uuid, p_cost integer) returns boolean
+-- Every reservation has an id and a status, so a reservation that was never released or settled
+-- (crash, DB blip) can be found and given back later (credits_reconcile). Status moves only
+-- reserved -> settled or reserved -> released, and only once.
+create table public.credit_reservations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  cost integer not null check (cost > 0),
+  status text not null default 'reserved' check (status in ('reserved', 'settled', 'released')),
+  hint_log_id uuid references public.hint_log (id),
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create index credit_reservations_open_idx on public.credit_reservations (created_at) where status = 'reserved';
+alter table public.credit_reservations enable row level security; -- no policies: service role only
+revoke all on public.credit_reservations from anon, authenticated;
+
+-- Gives back one reservation. Idempotent: returns true only the first time (status was 'reserved').
+create function public.credits_release(p_reservation uuid) returns boolean
 language plpgsql security definer set search_path = public as $$
+declare
+  v_res public.credit_reservations%rowtype;
+begin
+  select * into v_res from public.credit_reservations where id = p_reservation for update;
+  if not found or v_res.status <> 'reserved' then
+    return false;
+  end if;
+  update public.credit_reservations set status = 'released', resolved_at = now() where id = v_res.id;
+  insert into public.credit_balances (user_id, balance) values (v_res.user_id, v_res.cost)
+  on conflict (user_id) do update set balance = public.credit_balances.balance + excluded.balance, updated_at = now();
+  insert into public.credit_ledger (user_id, delta, reason) values (v_res.user_id, v_res.cost, 'hint_release');
+  return true;
+end $$;
+
+-- Releases reservations still 'reserved' after p_timeout_seconds (optionally for one user). Idempotent and
+-- safe to run concurrently (rows are locked with SKIP LOCKED). Returns how many were released.
+create function public.credits_reconcile(p_timeout_seconds integer, p_user uuid default null) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id uuid;
+  v_count integer := 0;
+begin
+  for v_id in
+    select id from public.credit_reservations
+     where status = 'reserved'
+       and created_at < now() - make_interval(secs => p_timeout_seconds)
+       and (p_user is null or user_id = p_user)
+     for update skip locked
+  loop
+    if public.credits_release(v_id) then
+      v_count := v_count + 1;
+    end if;
+  end loop;
+  return v_count;
+end $$;
+
+-- Takes p_cost credits if the balance covers it and returns the reservation id, or null and changes nothing (C2).
+-- Stale reservations of this user are reconciled first, so a lost release heals on the next request.
+create function public.credits_reserve(p_user uuid, p_cost integer, p_timeout_seconds integer) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id uuid;
 begin
   if p_cost is null or p_cost <= 0 then
     raise exception 'cost must be a positive integer';
   end if;
+  perform public.credits_reconcile(p_timeout_seconds, p_user);
   update public.credit_balances
      set balance = balance - p_cost, updated_at = now()
    where user_id = p_user and balance >= p_cost;
   if not found then
-    return false;
+    return null;
   end if;
+  insert into public.credit_reservations (user_id, cost) values (p_user, p_cost) returning id into v_id;
   insert into public.credit_ledger (user_id, delta, reason) values (p_user, -p_cost, 'hint_reserve');
-  return true;
+  return v_id;
 end $$;
 
--- Gives back a reservation (failed hint, fallback, free cache hit). C3: a failed hint is not charged.
-create function public.credits_release(p_user uuid, p_cost integer) returns void
+-- C3: ONE transaction records the hash-only hint log row and marks the reservation settled (the charge
+-- stands). Returns false, changing nothing, if the reservation is no longer 'reserved' (already released
+-- by reconciliation); the caller then treats the hint as uncharged. Any error rolls back both writes.
+create function public.credits_settle_hint(
+  p_reservation uuid, p_exercise text, p_level integer, p_code_hash text,
+  p_tokens_in integer, p_tokens_out integer, p_fallback boolean
+) returns boolean
 language plpgsql security definer set search_path = public as $$
+declare
+  v_res public.credit_reservations%rowtype;
+  v_log uuid;
 begin
-  if p_cost is null or p_cost <= 0 then
-    raise exception 'cost must be a positive integer';
+  select * into v_res from public.credit_reservations where id = p_reservation for update;
+  if not found or v_res.status <> 'reserved' then
+    return false;
   end if;
-  insert into public.credit_balances (user_id, balance) values (p_user, p_cost)
-  on conflict (user_id) do update set balance = public.credit_balances.balance + excluded.balance, updated_at = now();
-  insert into public.credit_ledger (user_id, delta, reason) values (p_user, p_cost, 'hint_release');
+  insert into public.hint_log (user_id, exercise_id, level, code_hash, tokens_in, tokens_out, fallback)
+  values (v_res.user_id, p_exercise, p_level, p_code_hash, p_tokens_in, p_tokens_out, p_fallback)
+  returning id into v_log;
+  update public.credit_reservations
+     set status = 'settled', hint_log_id = v_log, resolved_at = now()
+   where id = v_res.id;
+  return true;
 end $$;
 
 -- Sets the balance to p_amount (C4: renewal resets, no rollover). The ledger records the difference.
@@ -201,7 +274,8 @@ $$;
 -- apply lifecycle ordering, change plan/status and reset credits. Any error rolls all of it back
 -- (including the event claim) so Razorpay's retry can succeed. Returns:
 --   'duplicate' (event id already processed), 'ignored' (event we do not act on),
---   'unknown_subscription' (not the learner's subscription), 'stale' (cancelled already, or older than
+--   'unknown_subscription' (no row has this subscription id yet: the event id is NOT claimed, caller retries),
+--   'mismatch' (the subscription belongs to another user: claimed, nothing applied), 'stale' (cancelled already, or older than
 --   the last applied event), 'applied'.
 -- p_status: active | halted | cancelled. p_credits: when not null and the status is active, the balance is
 -- reset to this amount (renewal, C4). p_event_at is the event's own timestamp (Razorpay created_at), or null.
@@ -213,22 +287,34 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_row public.subscriptions%rowtype;
 begin
-  insert into public.payment_events (event_id, kind) values (p_event_id, p_kind)
-  on conflict (event_id) do nothing;
-  if not found then
-    return 'duplicate';
-  end if;
   if p_kind = 'ignore' then
+    insert into public.payment_events (event_id, kind) values (p_event_id, p_kind)
+    on conflict (event_id) do nothing;
+    if not found then
+      return 'duplicate';
+    end if;
     return 'ignored';
   end if;
   if p_status not in ('active', 'halted', 'cancelled') then
     raise exception 'invalid status';
   end if;
 
+  -- Find the subscription BEFORE claiming the event id. An event can arrive after Razorpay created the
+  -- subscription but before payments_attach_subscription stored its id; claiming it then would make the
+  -- retry a "duplicate" and the learner would never get the plan. Unknown means: claim nothing, retry later.
   select * into v_row from public.subscriptions
    where razorpay_subscription_id = p_razorpay_subscription_id for update;
-  if not found or v_row.user_id <> p_user then
+  if not found then
     return 'unknown_subscription';
+  end if;
+
+  insert into public.payment_events (event_id, kind) values (p_event_id, p_kind)
+  on conflict (event_id) do nothing;
+  if not found then
+    return 'duplicate';
+  end if;
+  if v_row.user_id <> p_user then
+    return 'mismatch';
   end if;
   -- Cancelled is terminal, and a closed row is no longer the learner's current subscription.
   if v_row.status = 'cancelled' then
@@ -325,6 +411,7 @@ begin
     select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname in (
        'handle_new_user', 'credits_get_balance', 'credits_reserve', 'credits_release', 'credits_reset',
+       'credits_reconcile', 'credits_settle_hint',
        'hint_log_record', 'payments_claim_checkout', 'payments_attach_subscription',
        'payments_abandon_checkout', 'payments_apply_event', 'payments_live_subscription',
        'saved_code_upsert', 'saved_code_list', 'saved_code_delete', 'saved_code_delete_all',

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryAccounts } from "../account/service";
 import type { Authenticate } from "../auth/types";
+import { CREDITS } from "../config";
 import { InMemoryCredits } from "../credits";
 import { createHintHandler, createRateLimiter, type HandlerDeps } from "./handler";
 import { InMemoryHintLog } from "./hint-log";
@@ -224,9 +225,9 @@ describe("POST /api/hint", () => {
     const credits = new InMemoryCredits({ u1: 3 });
     const realRelease = credits.release.bind(credits);
     let failures = 1;
-    credits.release = async (u, c) => {
+    credits.release = async (id) => {
       if (failures-- > 0) throw new Error("db blip");
-      return realRelease(u, c);
+      return realRelease(id);
     };
     const { post } = setup({
       credits,
@@ -234,8 +235,109 @@ describe("POST /api/hint", () => {
         throw new Error("down");
       }),
     });
-    await post(req({ ...valid, level: 3 }));
+    const body = await (await post(req({ ...valid, level: 3 }))).json();
+    expect(body).toMatchObject({ charged: false, fallback: true });
     expect(credits.balances.get("u1")).toBe(3);
+  });
+
+  it("3.2: when release keeps failing the response does not claim charged:false, and the id is logged", async () => {
+    const t = 1_000;
+    const credits = new InMemoryCredits({ u1: 3 }, { now: () => t });
+    credits.release = async () => {
+      throw new Error("db down");
+    };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { post } = setup({
+      credits,
+      model: fakeModel(() => {
+        throw new Error("down");
+      }),
+    });
+    const body = await (await post(req({ ...valid, level: 3 }))).json();
+    const logged = errors.mock.calls.flat().map(String).join("\n");
+    errors.mockRestore();
+    expect(body).toMatchObject({ charged: true, refundPending: true, cost: 1 });
+    expect(body.reservationId).toMatch(/^res_/);
+    expect(logged).toContain(body.reservationId);
+    expect(credits.balances.get("u1")).toBe(2); // still debited until reconciled
+  });
+
+  it("3.2: a reservation whose release failed is given back by reconcile after the timeout, once", async () => {
+    let t = 1_000;
+    const credits = new InMemoryCredits({ u1: 3 }, { now: () => t });
+    const real = credits.release.bind(credits);
+    let down = true;
+    credits.release = async (id) => {
+      if (down) throw new Error("db down");
+      return real(id);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { post } = setup({
+      credits,
+      model: fakeModel(() => {
+        throw new Error("down");
+      }),
+    });
+    await post(req({ ...valid, level: 3 }));
+    vi.restoreAllMocks();
+    down = false;
+    expect(await credits.reconcile()).toBe(0); // too early
+    t += CREDITS.reservationTimeoutSeconds * 1000;
+    expect(await credits.reconcile()).toBe(1);
+    expect(await credits.reconcile()).toBe(0); // idempotent
+    expect(credits.balances.get("u1")).toBe(3);
+  });
+
+  it("C3: settle writes the hash-only hint log and keeps the charge in one step", async () => {
+    const hintLog = new InMemoryHintLog();
+    const credits = new InMemoryCredits(
+      { u1: 5 },
+      { onSettle: (userId, e) => hintLog.record({ userId, ...e, level: e.level as 1 }) },
+    );
+    const { post } = setup({ credits, hintLog });
+    const body = await (await post(req({ ...valid, level: 3, code: learnerCode }))).json();
+    expect(body).toMatchObject({ charged: true, cost: 1 });
+    expect(credits.balances.get("u1")).toBe(4);
+    expect(hintLog.entries).toHaveLength(1); // written by settle, not twice
+    expect(hintLog.entries[0].codeHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(hintLog.entries)).not.toContain("LEARNER_SECRET_CODE");
+  });
+
+  it("C3: if settle fails the hint is treated as failed: reservation released, no silent charge", async () => {
+    const credits = new InMemoryCredits(
+      { u1: 5 },
+      {
+        onSettle: () => {
+          throw new Error("hint_log insert failed");
+        },
+      },
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { post } = setup({ credits });
+    const res = await post(req({ ...valid, level: 3 }));
+    errors.mockRestore();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ charged: false, cost: 0 });
+    expect(credits.balances.get("u1")).toBe(5);
+    expect(credits.ledger.map((e) => e.reason)).toEqual(["hint_reserve", "hint_release"]);
+  });
+
+  it("3.2: a reservation released by reconcile before settle is not charged and not double-released", async () => {
+    const credits = new InMemoryCredits({ u1: 5 });
+    credits.settle = async () => false;
+    const { post } = setup({ credits });
+    const body = await (await post(req({ ...valid, level: 3 }))).json();
+    expect(body).toMatchObject({ charged: false });
+    expect(credits.balances.get("u1")).toBe(5);
+  });
+
+  it("3.2: reserve reconciles this user's stale reservations first (opportunistic)", async () => {
+    let t = 0;
+    const credits = new InMemoryCredits({ u1: 1 }, { now: () => t });
+    expect(await credits.reserve("u1", 1)).not.toBeNull();
+    expect(await credits.reserve("u1", 1)).toBeNull(); // balance 0, reservation still open
+    t += CREDITS.reservationTimeoutSeconds * 1000;
+    expect(await credits.reserve("u1", 1)).not.toBeNull(); // stale one was given back first
   });
 
   it("C5: a free account is limited to levels 1-2", async () => {
@@ -287,19 +389,17 @@ describe("POST /api/hint", () => {
     expect(logged.join("\n")).not.toContain("LEARNER_SECRET_CODE");
   });
 
-  it("N3: a failing hint log does not fail or un-charge the hint", async () => {
-    const credits = new InMemoryCredits({ u1: 5 });
+  it("N3: a failing hint log on a free hint does not fail the request", async () => {
     const hintLog = {
       record: async () => {
         throw new Error("db down");
       },
     };
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { post } = setup({ credits, hintLog });
-    const res = await post(req({ ...valid, level: 3 }));
+    const { post } = setup({ hintLog });
+    const res = await post(req({ ...valid, level: 2 }));
     errors.mockRestore();
     expect(res.status).toBe(200);
-    expect(credits.balances.get("u1")).toBe(4);
   });
 
   it("N1: the old x-user-id header is not an identity", async () => {

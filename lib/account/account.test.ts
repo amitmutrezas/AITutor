@@ -116,7 +116,9 @@ describe("A3: delete account", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
     });
     expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
-    expect((fetchFn.mock.calls as unknown as string[][])[0][0]).toBe("https://api.razorpay.com/v1/subscriptions/sub_1/cancel");
+    expect((fetchFn.mock.calls as unknown as string[][])[0][0]).toBe(
+      "https://api.razorpay.com/v1/subscriptions/sub_1/cancel",
+    );
     expect(await accounts.get("u1")).toBeNull();
   });
 

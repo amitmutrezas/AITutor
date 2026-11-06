@@ -9,7 +9,12 @@ export type ClaimResult =
   | { kind: "active_exists" }
   | { kind: "in_progress" };
 
-export type ApplyOutcome = "duplicate" | "ignored" | "unknown_subscription" | "stale" | "applied";
+/**
+ * "unknown_subscription": no row has this Razorpay subscription id yet. The event id is NOT claimed,
+ * so a retry after the id is attached is applied (P2). "mismatch": the subscription belongs to another user.
+ */
+export type ApplyOutcome =
+  "duplicate" | "ignored" | "unknown_subscription" | "mismatch" | "stale" | "applied";
 
 export interface ApplyEventInput {
   eventId: string;
@@ -124,12 +129,21 @@ export class InMemoryPaymentStore implements PaymentStore {
   }
 
   async applyEvent(input: ApplyEventInput): Promise<ApplyOutcome> {
+    if (input.kind === "ignore") {
+      if (this.processed.has(input.eventId)) return "duplicate";
+      this.processed.add(input.eventId);
+      return "ignored";
+    }
+    // Look the subscription up BEFORE claiming the event id (see ApplyOutcome).
+    const row = this.rows.find(
+      (r) =>
+        r.razorpaySubscriptionId !== null &&
+        r.razorpaySubscriptionId === input.razorpaySubscriptionId,
+    );
+    if (!row) return "unknown_subscription";
     if (this.processed.has(input.eventId)) return "duplicate";
     this.processed.add(input.eventId);
-    if (input.kind === "ignore") return "ignored";
-
-    const row = this.rows.find((r) => r.razorpaySubscriptionId === input.razorpaySubscriptionId);
-    if (!row || row.userId !== input.userId) return "unknown_subscription";
+    if (row.userId !== input.userId) return "mismatch";
     if (row.status === "cancelled") return "stale";
     const at = input.eventAt?.getTime() ?? null;
     if (at !== null && row.lastEventAt !== null && at < row.lastEventAt) return "stale";

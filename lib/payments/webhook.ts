@@ -63,11 +63,17 @@ export async function handleRazorpayWebhook(
   try {
     const outcome = await deps.store.applyEvent(input);
     if (outcome === "unknown_subscription") {
-      // Signed, but not the learner's current subscription. Acknowledge, but leave a trace for
-      // reconciliation. Ids only: no emails, no code.
+      // The event can beat our DB row: Razorpay created the subscription but we have not stored its
+      // id yet. The event id was NOT claimed, so answer a retryable 503 (generic body) and let
+      // Razorpay redeliver. A truly unknown subscription keeps retrying and stays in the logs.
+      // Ids only: no emails, no code.
       console.warn(
         JSON.stringify({ event: "webhook_unknown_subscription", eventId, userId: input.userId }),
       );
+      return new Response(null, { status: 503 });
+    }
+    if (outcome === "mismatch") {
+      console.warn(JSON.stringify({ event: "webhook_subscription_mismatch", eventId }));
     }
     return ok();
   } catch {

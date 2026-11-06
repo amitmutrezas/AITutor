@@ -1,23 +1,52 @@
 import { z } from "zod";
+import { CREDITS } from "../config";
 import { callRpc, type RpcClient } from "../db/rpc";
 import { assertCost, type CreditsPort } from "./types";
 
 /**
- * Postgres-backed CreditsPort. Each call is one SQL function (credits_reserve, credits_release,
- * credits_get_balance) that runs in its own transaction: the balance change and its ledger row
- * commit together or not at all, and reserve is a single conditional UPDATE, so two concurrent
- * requests cannot both spend the last credit (C2, POLICY 3.1).
+ * Postgres-backed CreditsPort. Each call is one SQL function that runs in its own transaction:
+ * credits_reserve is a single conditional UPDATE plus a reservation row (two concurrent requests
+ * cannot both spend the last credit), credits_release is idempotent, credits_settle_hint writes the
+ * hash-only hint log and marks the reservation settled together, and credits_reconcile gives back
+ * reservations nobody resolved (C2, C3, POLICY 3.1, 3.2).
  */
 export function createSupabaseCredits(db: RpcClient): CreditsPort {
+  const timeout = CREDITS.reservationTimeoutSeconds;
   return {
     reserve: async (userId, cost) => {
       assertCost(cost);
-      return await callRpc(db, "credits_reserve", { p_user: userId, p_cost: cost }, z.boolean());
+      const id = await callRpc(
+        db,
+        "credits_reserve",
+        { p_user: userId, p_cost: cost, p_timeout_seconds: timeout },
+        z.string().nullable(),
+      );
+      return id ? { id } : null;
     },
-    release: async (userId, cost) => {
-      assertCost(cost);
-      await callRpc(db, "credits_release", { p_user: userId, p_cost: cost }, z.unknown());
-    },
+    release: (reservationId) =>
+      callRpc(db, "credits_release", { p_reservation: reservationId }, z.boolean()),
+    settle: (reservationId, e) =>
+      callRpc(
+        db,
+        "credits_settle_hint",
+        {
+          p_reservation: reservationId,
+          p_exercise: e.exerciseId,
+          p_level: e.level,
+          p_code_hash: e.codeHash,
+          p_tokens_in: e.tokensIn,
+          p_tokens_out: e.tokensOut,
+          p_fallback: e.fallback,
+        },
+        z.boolean(),
+      ),
+    reconcile: () =>
+      callRpc(
+        db,
+        "credits_reconcile",
+        { p_timeout_seconds: timeout },
+        z.number().int().nonnegative(),
+      ),
     balance: (userId) =>
       callRpc(db, "credits_get_balance", { p_user: userId }, z.number().int().nonnegative()),
   };

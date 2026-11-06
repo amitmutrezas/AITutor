@@ -186,20 +186,57 @@ describe("P2: webhook handler", () => {
     expect(store.processed.size).toBe(0);
   });
 
-  it("P2: an event for a subscription that is not the learner's is acknowledged and changes nothing", async () => {
+  it("P2: an event for another learner's subscription is acknowledged and changes nothing", async () => {
     const store = await checkedOut("u1", "sub_1");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    // Right subscription id, wrong user in the notes.
     const wrongUser = event("subscription.charged", { user: "u2" });
     expect((await handleRazorpayWebhook(hook(wrongUser, { id: "e1" }), deps(store))).status).toBe(
       200,
     );
-    // Unknown subscription id for the right user.
-    const unknown = event("subscription.charged", { sub: "sub_other" });
-    expect((await handleRazorpayWebhook(hook(unknown, { id: "e2" }), deps(store))).status).toBe(
+    warn.mockRestore();
+    expect(store.subscriptions.get("u1")?.status).toBe("pending");
+    expect(store.credits.size).toBe(0);
+  });
+
+  it("P2: an event that beats the subscription id (webhook racing subscribe) is 503 and applied on retry", async () => {
+    const store = new InMemoryPaymentStore();
+    const claim = await store.claimCheckout("u1", "basic"); // Razorpay created sub_1; our row has no id yet
+    if (claim.kind !== "claimed") throw new Error("expected a claim");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const body = event("subscription.charged");
+
+    const early = await handleRazorpayWebhook(hook(body, { id: "evt_race" }), deps(store));
+    expect(early.status).toBe(503);
+    expect(await early.text()).toBe("");
+    expect(store.processed.has("evt_race")).toBe(false); // the event id was NOT claimed
+    expect(store.credits.size).toBe(0);
+
+    await store.attachSubscription(claim.claimId, "sub_1");
+    const retry = await handleRazorpayWebhook(hook(body, { id: "evt_race" }), deps(store));
+    warn.mockRestore();
+    expect(retry.status).toBe(200);
+    expect(store.subscriptions.get("u1")?.status).toBe("active");
+    expect(store.credits.get("u1")).toBe(PAYMENT_PLANS.basic.monthlyCredits);
+
+    // And a further replay is now a harmless duplicate.
+    store.credits.set("u1", 1);
+    expect((await handleRazorpayWebhook(hook(body, { id: "evt_race" }), deps(store))).status).toBe(
       200,
     );
+    expect(store.credits.get("u1")).toBe(1);
+  });
+
+  it("P2: a truly unknown subscription changes nothing, claims nothing and is logged", async () => {
+    const store = await checkedOut("u1", "sub_1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const unknown = event("subscription.charged", { sub: "sub_other" });
+    const res = await handleRazorpayWebhook(hook(unknown, { id: "e2" }), deps(store));
+    const logged = warn.mock.calls.flat().map(String).join("\n");
     warn.mockRestore();
+    expect(res.status).toBe(503);
+    expect(logged).toContain("webhook_unknown_subscription");
+    expect(logged).toContain("e2");
+    expect(store.processed.size).toBe(0);
     expect(store.subscriptions.get("u1")?.status).toBe("pending");
     expect(store.credits.size).toBe(0);
   });

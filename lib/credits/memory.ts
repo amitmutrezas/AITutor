@@ -1,4 +1,21 @@
-import { assertCost, type CreditsPort } from "./types";
+import { CREDITS } from "../config";
+import { assertCost, type CreditsPort, type Reservation, type SettleEntry } from "./types";
+
+type Status = "reserved" | "settled" | "released";
+interface Row {
+  id: string;
+  userId: string;
+  cost: number;
+  status: Status;
+  createdAt: number;
+}
+
+export interface InMemoryCreditsOptions {
+  now?: () => number;
+  timeoutMs?: number;
+  /** Receives the hint log row on settle. If it throws, settle changes nothing (atomic). */
+  onSettle?: (userId: string, entry: SettleEntry) => void | Promise<void>;
+}
 
 /**
  * In-memory fake of CreditsPort for unit tests. reserve is one synchronous check-and-decrement,
@@ -7,24 +24,60 @@ import { assertCost, type CreditsPort } from "./types";
 export class InMemoryCredits implements CreditsPort {
   readonly balances = new Map<string, number>();
   readonly ledger: { userId: string; delta: number; reason: string }[] = [];
+  readonly reservations = new Map<string, Row>();
+  private seq = 0;
+  private now: () => number;
+  private timeoutMs: number;
 
-  constructor(initial: Record<string, number> = {}) {
+  constructor(
+    initial: Record<string, number> = {},
+    private opts: InMemoryCreditsOptions = {},
+  ) {
     for (const [id, n] of Object.entries(initial)) this.balances.set(id, n);
+    this.now = opts.now ?? Date.now;
+    this.timeoutMs = opts.timeoutMs ?? CREDITS.reservationTimeoutSeconds * 1000;
   }
 
-  async reserve(userId: string, cost: number): Promise<boolean> {
+  async reserve(userId: string, cost: number): Promise<Reservation | null> {
     assertCost(cost);
+    await this.reconcileFor(userId);
     const bal = this.balances.get(userId) ?? 0;
-    if (bal < cost) return false;
+    if (bal < cost) return null;
     this.balances.set(userId, bal - cost);
+    const id = `res_${++this.seq}`;
+    this.reservations.set(id, { id, userId, cost, status: "reserved", createdAt: this.now() });
     this.ledger.push({ userId, delta: -cost, reason: "hint_reserve" });
+    return { id };
+  }
+
+  async release(reservationId: string): Promise<boolean> {
+    const r = this.reservations.get(reservationId);
+    if (!r || r.status !== "reserved") return false;
+    r.status = "released";
+    this.balances.set(r.userId, (this.balances.get(r.userId) ?? 0) + r.cost);
+    this.ledger.push({ userId: r.userId, delta: r.cost, reason: "hint_release" });
     return true;
   }
 
-  async release(userId: string, cost: number): Promise<void> {
-    assertCost(cost);
-    this.balances.set(userId, (this.balances.get(userId) ?? 0) + cost);
-    this.ledger.push({ userId, delta: cost, reason: "hint_release" });
+  async settle(reservationId: string, entry: SettleEntry): Promise<boolean> {
+    const r = this.reservations.get(reservationId);
+    if (!r || r.status !== "reserved") return false;
+    await this.opts.onSettle?.(r.userId, entry); // throws before any state change
+    r.status = "settled";
+    return true;
+  }
+
+  async reconcile(): Promise<number> {
+    return this.reconcileFor(undefined);
+  }
+
+  private async reconcileFor(userId: string | undefined): Promise<number> {
+    let n = 0;
+    for (const r of this.reservations.values()) {
+      if (r.status !== "reserved" || (userId && r.userId !== userId)) continue;
+      if (this.now() - r.createdAt >= this.timeoutMs && (await this.release(r.id))) n++;
+    }
+    return n;
   }
 
   async balance(userId: string): Promise<number> {

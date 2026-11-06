@@ -33,6 +33,8 @@ the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names a
   learner's current subscription (the row with that Razorpay subscription id and user), applies lifecycle
   ordering (cancelled is terminal; events older than the last applied one are ignored), then changes plan
   and status and resets credits, all in one transaction.
+- A webhook for a subscription id no row has yet (it can beat `attachSubscription`) does not claim the event id and
+  answers a retryable 503, so Razorpay's retry is applied once the id is attached.
 - `/api/razorpay/subscribe` uses the real session (`lib/auth`). The checkout attempt is claimed in the
   database before Razorpay is called: a pending checkout for the same plan is reused, an active
   subscription is refused (409), and a pending checkout for another plan is closed at Razorpay.

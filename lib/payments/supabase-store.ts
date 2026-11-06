@@ -14,7 +14,14 @@ const claimResult = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("in_progress") }),
 ]);
 
-const applyOutcome = z.enum(["duplicate", "ignored", "unknown_subscription", "stale", "applied"]);
+const applyOutcome = z.enum([
+  "duplicate",
+  "ignored",
+  "unknown_subscription",
+  "mismatch",
+  "stale",
+  "applied",
+]);
 
 const liveRow = z
   .object({

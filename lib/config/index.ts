@@ -87,3 +87,8 @@ export const SAVED_CODE = {
   maxChars: 20_000,
   maxExerciseIdChars: 100,
 } as const;
+
+/** Credit reservations (C3). A reservation neither released nor settled after this long is given back. */
+export const CREDITS = {
+  reservationTimeoutSeconds: 300,
+} as const;
