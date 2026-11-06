@@ -41,7 +41,7 @@ the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names a
   subscription is cancelled; if that fails too the claim row is kept and `razorpay_subscription_unattached` is
   logged with the id. Account deletion is blocked if any row with a Razorpay subscription id (even pending) cannot
   be cancelled there. A renewal reset (`credits_reset`) expires open credit reservations with no refund (C4).
-- `/api/cron/reconcile-credits` (vercel.json, every 5 minutes, `Authorization: Bearer $CRON_SECRET`) releases stale
+- `/api/cron/reconcile-credits` (vercel.json, daily at 03:00 UTC (Hobby plan allows daily crons only; credits_reserve also reconciles that learner's stale reservations on every request, so a daily sweep is enough; use every 5 minutes on Pro), `Authorization: Bearer $CRON_SECRET`) releases stale
   credit reservations. Vercel Cron needs a plan that allows sub-daily schedules.
 - `/api/razorpay/subscribe` uses the real session (`lib/auth`). The checkout attempt is claimed in the
   database before Razorpay is called: a pending checkout for the same plan is reused, an active
