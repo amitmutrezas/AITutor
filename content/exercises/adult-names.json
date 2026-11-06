@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction adultNames(people) {\n  // TODO: an empty array for the results\n  for (const person of people) {\n    // TODO: if this person is 18 or older, keep their name only\n  }\n  // TODO: give back the results\n}",
     "Here is the full solution.\n\nfunction adultNames(people) {\n  const names = [];\n  for (const person of people) {\n    if (person.age >= 18) {\n      names.push(person.name);\n    }\n  }\n  return names;\n}\n\nThe loop looks at each person, the condition keeps age 18 and above, and `push` stores only the name."
   ],
-  "status": "verified"
+  "status": "live"
 }
