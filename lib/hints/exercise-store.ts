@@ -3,7 +3,7 @@ import type { ExerciseForHint, ExerciseWithSolution } from "./types";
 /**
  * Exercise access for the hint route. Implementations must select columns explicitly and
  * must not read referenceSolution unless `withSolution` is true (CLAUDE.md, H2).
- * TODO(M1 integration): replace the in-memory stub with the real loader.
+ * The in-memory store below is a test fake; production uses lib/exercises/content.ts.
  */
 export interface LoadExercise {
   (id: string, opts: { withSolution: false }): Promise<ExerciseForHint | null>;
