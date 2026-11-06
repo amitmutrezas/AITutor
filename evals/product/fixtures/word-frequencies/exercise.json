@@ -1,0 +1,5 @@
+{
+  "id": "eval-word-frequencies",
+  "title": "Word frequencies",
+  "referenceSolution": "function wordFrequencies(text) {\n  const counts = {};\n  for (const word of text.toLowerCase().split(/\\s+/).filter(Boolean)) {\n    counts[word] = (counts[word] || 0) + 1;\n  }\n  const entries = Object.entries(counts);\n  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));\n  return entries.slice(0, 3);\n}\n"
+}

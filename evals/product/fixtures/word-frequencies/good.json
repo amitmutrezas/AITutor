@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "nudge",
+    "hint": "What does the input look like after you break it into separate words? Print it and look."
+  },
+  {
+    "kind": "nudge-case",
+    "hint": "Does your function treat 'The' and 'the' as the same word?"
+  },
+  {
+    "kind": "concept-counting",
+    "hint": "This is a counting problem. A plain object can act as a dictionary where each word is a key and its value is how many times you have seen it."
+  },
+  {
+    "kind": "concept-sorting",
+    "hint": "Sorting with a comparator function: it returns a negative number, zero or a positive number to say which of two items comes first. You can combine two criteria by trying the second only when the first is a tie."
+  },
+  {
+    "kind": "locate",
+    "hint": "Your loop on line 3 overwrites the value each time instead of adding to it, so every count ends at 1. Think about what the value should be before the first time you see a word."
+  },
+  {
+    "kind": "locate-sort",
+    "hint": "The problem is the sort: you compare the words, but the task wants the highest count first. Which part of each pair holds the count?"
+  },
+  {
+    "kind": "scaffold-blanks",
+    "hint": "function wordFrequencies(text) {\n  const counts = ___;\n  // 1. split text into lowercase words\n  // 2. for each word, update counts\n  // 3. turn counts into pairs and sort them\n  return ___;\n}"
+  },
+  {
+    "kind": "one-line-snippet",
+    "hint": "You will probably want text.toLowerCase() before splitting, so that capital letters do not create separate words."
+  },
+  {
+    "kind": "api-pointer",
+    "hint": "Look up Object.entries and Array.prototype.slice. Between them you can go from a counts object to the first three pairs."
+  },
+  {
+    "kind": "encouragement",
+    "hint": "You are close. Your counting works; run the tie test case and compare the order you get with the expected one. What decides the order when two words have the same count?"
+  }
+]
