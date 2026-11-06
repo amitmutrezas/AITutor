@@ -27,7 +27,7 @@ export function createSupabaseServerAuth(
 /** The part of the Supabase client the provider uses (so tests can pass a fake). */
 export type SupabaseAuthLike = Pick<
   NonNullable<ReturnType<typeof createSupabaseServerAuth>>["auth"],
-  "signUp" | "signInWithPassword" | "signOut"
+  "signInWithOtp" | "verifyOtp" | "signOut"
 >;
 
 export function createSupabaseAuthProvider(
@@ -37,18 +37,18 @@ export function createSupabaseAuthProvider(
   const supabase = client ?? createSupabaseServerAuth(store);
   if (!supabase) return null;
   return {
-    async signUp(email, password, confirmRedirectTo) {
-      const { data, error } = await supabase.auth.signUp({
+    async sendCode(email, confirmRedirectTo) {
+      const { error } = await supabase.auth.signInWithOtp({
         email,
-        password,
-        options: { emailRedirectTo: confirmRedirectTo },
+        // A new email creates the account; an existing one just signs in.
+        options: { shouldCreateUser: true, emailRedirectTo: confirmRedirectTo },
       });
-      if (error) return "error";
-      return data.session ? "signed_in" : "confirm_email";
+      if (!error) return "sent";
+      return error.status === 429 ? "rate_limited" : "error";
     },
-    async signIn(email, password) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      return !error;
+    async verifyCode(email, token) {
+      const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+      return !error && !!data.session;
     },
     async signOut() {
       // signOut resolves with { error } instead of throwing; a failure means the session may still be

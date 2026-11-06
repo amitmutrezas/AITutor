@@ -124,7 +124,8 @@ export function CheckoutClient({
             account.
           </p>
           <p>
-            <Link href="/account">See my account</Link> · <Link href="/exercises">Back to exercises</Link>
+            <Link href="/account">See my account</Link> ·{" "}
+            <Link href="/exercises">Back to exercises</Link>
           </p>
         </div>
       );
@@ -207,9 +208,7 @@ export function CheckoutClient({
 function PolicyNote() {
   return (
     <p>
-      <small>
-        Terms (coming soon) and Refund policy (coming soon) will apply to paid plans.
-      </small>
+      <small>Terms (coming soon) and Refund policy (coming soon) will apply to paid plans.</small>
     </p>
   );
 }

@@ -14,8 +14,8 @@ export default function Home() {
         </Link>
       </p>
       <p>
-        <Link href="/signup">Create an account</Link> · <Link href="/signin">Sign in</Link> ·{" "}
-        <Link href="/plans">Plans</Link> · <Link href="/account">Account</Link>
+        <Link href="/signin">Sign in or create account</Link> · <Link href="/plans">Plans</Link> ·{" "}
+        <Link href="/account">Account</Link>
       </p>
     </main>
   );

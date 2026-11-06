@@ -11,11 +11,13 @@ test("R2: open an exercise, run failing tests, see per-test results", async ({ p
   await expect(results).toContainText("Expected 6");
 });
 
-test("R1: passing code shows the complete state and marks the exercise solved", async ({ page }) => {
+test("R1: passing code shows the complete state and marks the exercise solved", async ({
+  page,
+}) => {
   await page.goto("/exercises/sum-of-array");
-  await page.getByLabel("Your code (JavaScript)").fill(
-    "function sumOfArray(n) { return n.reduce((a, b) => a + b, 0); }",
-  );
+  await page
+    .getByLabel("Your code (JavaScript)")
+    .fill("function sumOfArray(n) { return n.reduce((a, b) => a + b, 0); }");
   await page.getByRole("button", { name: "Run tests" }).click();
   await expect(page.getByRole("heading", { name: "Exercise complete" })).toBeVisible();
   await page.goto("/exercises");
@@ -29,7 +31,9 @@ test("R1: an infinite loop times out instead of hanging the page", async ({ page
   await expect(page.getByTestId("results")).toContainText("Timed out", { timeout: 6000 });
 });
 
-test("N4: hint ladder lists five levels and each button is keyboard reachable", async ({ page }) => {
+test("N4: hint ladder lists five levels and each button is keyboard reachable", async ({
+  page,
+}) => {
   await page.goto("/exercises/sum-of-array");
   const ladder = page.getByRole("region", { name: "Hint ladder" });
   await expect(ladder.getByRole("listitem")).toHaveCount(5);
@@ -74,27 +78,38 @@ test("J1: the landing page leads into the exercises and sign in", async ({ page 
   await page.getByRole("link", { name: "Start an exercise" }).click();
   await expect(page).toHaveURL(/\/exercises$/);
   await page.goto("/");
-  await page.getByRole("link", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: "Sign in or create account" }).click();
   await expect(page).toHaveURL(/\/signin$/);
 });
 
 test("A1: the sign-in page keeps a safe return path and drops an unsafe one", async ({ page }) => {
   await page.goto("/signin?next=%2Fcheckout%3Fplan%3Dbasic");
-  await expect(page.getByRole("link", { name: /Create an account/ })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Continue with Google" })).toHaveAttribute(
     "href",
-    "/signup?next=%2Fcheckout%3Fplan%3Dbasic",
+    "/api/auth/google?next=%2Fcheckout%3Fplan%3Dbasic",
   );
   await page.goto("/signin?next=https%3A%2F%2Fevil.example");
-  await expect(page.getByRole("link", { name: /Create an account/ })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Continue with Google" })).toHaveAttribute(
     "href",
-    "/signup?next=%2Faccount",
+    "/api/auth/google?next=%2Faccount",
   );
+});
+
+test("A1: the sign-in page is one screen asking for an email, with no password", async ({
+  page,
+}) => {
+  await page.goto("/signin");
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send me a code" })).toBeVisible();
+  await expect(page.getByLabel(/password/i)).toHaveCount(0);
 });
 
 test("L1: policy links are plain text until the pages exist, not dead links", async ({ page }) => {
   await page.goto("/plans");
   await expect(page.getByText("Terms (coming soon)")).toBeVisible();
-  await expect(page.locator('a[href="/terms"], a[href="/refund"], a[href="/privacy"]')).toHaveCount(0);
+  await expect(page.locator('a[href="/terms"], a[href="/refund"], a[href="/privacy"]')).toHaveCount(
+    0,
+  );
 });
 
 for (const [label, target] of [

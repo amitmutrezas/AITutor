@@ -1,17 +1,14 @@
-import { AuthForm } from "../../components/auth/AuthForm";
+import { redirect } from "next/navigation";
 import { safeNextPath } from "../../lib/auth/next-path";
 
-export const metadata = { title: "Create account - Unstuck" };
-
+// Sign in and create account are the same screen now. Old links to /signup land on it.
 export default async function SignUpPage({
   searchParams,
 }: {
   searchParams: Promise<{ next?: string | string[] }>;
 }) {
   const { next } = await searchParams;
-  return (
-    <main>
-      <AuthForm mode="signup" next={next === undefined ? undefined : safeNextPath(next)} />
-    </main>
+  redirect(
+    next === undefined ? "/signin" : `/signin?next=${encodeURIComponent(safeNextPath(next))}`,
   );
 }

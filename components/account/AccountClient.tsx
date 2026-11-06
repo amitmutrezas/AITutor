@@ -81,8 +81,8 @@ export function AccountClient() {
       <>
         <h1>Your account</h1>
         <p>
-          Please <Link href="/signin">sign in</Link> or{" "}
-          <Link href="/signup">create an account</Link> to see your plan, credits and saved code.
+          Please <Link href="/signin">sign in or create an account</Link> to see your plan, credits
+          and saved code.
         </p>
       </>
     );

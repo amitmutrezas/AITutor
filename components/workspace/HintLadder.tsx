@@ -27,9 +27,10 @@ export function HintLadder({
 }) {
   const [busy, setBusy] = useState<number | null>(null);
   const [hint, setHint] = useState<HintView | null>(null);
-  const [problem, setProblem] = useState<{ text: string; link?: { href: string; label: string } } | null>(
-    null,
-  );
+  const [problem, setProblem] = useState<{
+    text: string;
+    link?: { href: string; label: string };
+  } | null>(null);
 
   async function ask(level: number) {
     setBusy(level);
