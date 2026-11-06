@@ -10,8 +10,8 @@
     "If you could flip the text around, how would you decide whether anything changed?",
     "Compare the text with its own reverse. Before comparing, make the text consistent so that capitals and spaces cannot cause a difference.",
     "Strings do not have a reverse method of their own, but arrays do. Think about how to turn a string into an array of characters and back. Clean the text first, then compare the cleaned version with the flipped version.",
-    "Lowercase the text and remove the spaces to get a cleaned string. Build a second string from the cleaned one by splitting it into characters, reversing, and joining. Return whether the two strings are equal.",
-    "Use `const cleaned = text.toLowerCase().split(' ').join('');`, then `const backwards = cleaned.split('').reverse().join('');`, and `return cleaned === backwards;`."
+    "Here is a skeleton. Fill in each TODO.\n\nfunction isPalindrome(text) {\n  // TODO: a cleaned copy: lowercase, no spaces\n  // TODO: a flipped copy of the cleaned one (string -> array -> reverse -> string)\n  // TODO: are the two copies equal? Give that back\n}",
+    "Here is the full solution.\n\nfunction isPalindrome(text) {\n  const cleaned = text.toLowerCase().split(' ').join('');\n  const backwards = cleaned.split('').reverse().join('');\n  return cleaned === backwards;\n}\n\nCleaning first removes case and spaces, then a string equals its reverse exactly when it is a palindrome."
   ],
   "status": "draft"
 }

@@ -10,8 +10,8 @@
     "Picture reading the word from the last letter to the first. What would you need to look at, one letter at a time?",
     "You can visit each character of a string in order, the same way you visit items in an array. Think about how to build up a new string as you go.",
     "Each new character you visit belongs at the front of what you have built so far, not at the end. Check where your current code puts it. What should the new string start as?",
-    "Start with an empty string, go through the characters one by one, put each one in front of the string you are building, and return that string when the loop finishes.",
-    "Use `let result = '';`, then `for (const character of text) { result = character + result; }`, and finally `return result;`."
+    "Here is a skeleton. Fill in each TODO.\n\nfunction reverseString(text) {\n  // TODO: a variable to build the answer in, starting empty\n  for (const character of text) {\n    // TODO: join the character to the answer so it ends up first\n  }\n  // TODO: give back the answer\n}",
+    "Here is the full solution.\n\nfunction reverseString(text) {\n  let result = '';\n  for (const character of text) {\n    result = character + result;\n  }\n  return result;\n}\n\nEach character is added in front of the result, so the first character ends up last."
   ],
   "status": "draft"
 }

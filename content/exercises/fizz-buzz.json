@@ -10,8 +10,8 @@
     "You will make one answer for each number from 1 up to n. What shape of code repeats a step for a range of numbers?",
     "The remainder operator tells you whether one number divides evenly into another. The order in which you check the rules matters, so think about which rule is the most specific.",
     "If you check 'divisible by 3' first, a number like 15 gets the wrong word. Check the case that needs both conditions before the single-condition cases. Also remember every entry must be a string.",
-    "Loop from 1 to n, collecting results in an array. For each number check the 'both' case first, then 3, then 5, and otherwise use the number converted to a string. Return the array.",
-    "Use `const result = [];` and `for (let i = 1; i <= n; i++)`. Inside: `if (i % 15 === 0)` push 'FizzBuzz', else if `i % 3 === 0` push 'Fizz', else if `i % 5 === 0` push 'Buzz', else `result.push(String(i));`. Finish with `return result;`."
+    "Here is a skeleton. Fill in each TODO.\n\nfunction fizzBuzz(n) {\n  // TODO: an empty array to collect answers\n  for (let i = 1; i <= n; i++) {\n    // TODO: check the 'both' case first, then 3, then 5\n    // TODO: otherwise add the number as a string\n  }\n  // TODO: give back the collected answers\n}",
+    "Here is the full solution.\n\nfunction fizzBuzz(n) {\n  const result = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 15 === 0) {\n      result.push('FizzBuzz');\n    } else if (i % 3 === 0) {\n      result.push('Fizz');\n    } else if (i % 5 === 0) {\n      result.push('Buzz');\n    } else {\n      result.push(String(i));\n    }\n  }\n  return result;\n}\n\nTesting 15 first matters: a multiple of both would otherwise be caught by the 3 or 5 rule."
   ],
   "status": "draft"
 }

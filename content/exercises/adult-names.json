@@ -10,8 +10,8 @@
     "You are being asked to pick some items from a list and then report one detail about each. What are the two separate jobs?",
     "Look at one person at a time. Each person is an object, so you read their details with dot notation. Decide first whether to include them, and only then think about what to store.",
     "Check the boundary carefully: exactly 18 should be included. The result holds names only, not whole person objects, so be careful about what you add to your new array.",
-    "Make an empty array for the results, loop over the people, and when a person's age is at least 18 add just their name to the results. Return the results after the loop.",
-    "Use `const names = [];`, `for (const person of people)`, and `if (person.age >= 18) { names.push(person.name); }`. Then `return names;`."
+    "Here is a skeleton. Fill in each TODO.\n\nfunction adultNames(people) {\n  // TODO: an empty array for the results\n  for (const person of people) {\n    // TODO: if this person is 18 or older, keep their name only\n  }\n  // TODO: give back the results\n}",
+    "Here is the full solution.\n\nfunction adultNames(people) {\n  const names = [];\n  for (const person of people) {\n    if (person.age >= 18) {\n      names.push(person.name);\n    }\n  }\n  return names;\n}\n\nThe loop looks at each person, the condition keeps age 18 and above, and `push` stores only the name."
   ],
   "status": "draft"
 }
