@@ -12,8 +12,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "exercises:verify": "node scripts/not-implemented.mjs exercises:verify M1",
-    "evals:product": "node scripts/not-implemented.mjs evals:product M2"
+    "exercises:verify": "node scripts/verify-exercises.ts",
+    "evals:product": "vitest run --config evals/product/vitest.config.ts"
   },
   "dependencies": {
     "next": "^16.4.5",
