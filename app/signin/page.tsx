@@ -1,7 +1,7 @@
 import { safeNextPath } from "../../lib/auth/next-path";
 import { AuthForm } from "../../components/auth/AuthForm";
 
-export const metadata = { title: "Sign in - Unstuck" };
+export const metadata = { title: "Sign in or create account - Unstuck" };
 
 export default async function SignInPage({
   searchParams,
@@ -13,11 +13,10 @@ export default async function SignInPage({
   return (
     <main>
       <AuthForm
-        mode="signin"
         next={next === undefined ? undefined : safeNextPath(next)}
         notice={
           key === "confirm"
-            ? "That confirmation link did not work. Sign in, or create the account again to get a new link."
+            ? "That email link did not work. Enter your email to get a new code."
             : undefined
         }
       />
