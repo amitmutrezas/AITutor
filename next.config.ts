@@ -16,6 +16,13 @@ const csp = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Exercises are read from content/exercises at request time; make sure the files ship with the
+  // server bundles that read them (list, workspace, hint route).
+  outputFileTracingIncludes: {
+    "/exercises": ["./content/exercises/**/*.json"],
+    "/exercises/[id]": ["./content/exercises/**/*.json"],
+    "/api/hint": ["./content/exercises/**/*.json"],
+  },
   async headers() {
     return [{ source: "/((?!runner/worker\\.js).*)", headers: [{ key: "Content-Security-Policy", value: csp }] }];
   },

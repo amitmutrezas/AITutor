@@ -4,7 +4,7 @@ import type { Authenticate } from "../auth/types";
 import { createSupabaseCredits, type CreditsPort } from "../credits";
 import { createServiceRpc } from "../db/service-client";
 import { createAnthropicModel } from "../hints/anthropic";
-import { createInMemoryExerciseStore } from "../hints/exercise-store";
+import { createContentExerciseStore } from "../exercises/content";
 import { createHintHandler, createRateLimiter } from "../hints/handler";
 import { createSupabaseHintLog, type HintLogPort } from "../hints/hint-log";
 import { createSupabasePaymentStore } from "../payments/supabase-store";
@@ -49,8 +49,8 @@ export function getHintHandler(): ((req: Request) => Promise<Response>) | null {
   const s = getServices();
   if (!s) return null;
   hintHandler ??= createHintHandler({
-    // TODO(M1 integration): replace the in-memory exercise store with the real loader.
-    loadExercise: createInMemoryExerciseStore(),
+    // Live exercises from content/exercises; the solution is read only for levels 4-5 and the leak check.
+    loadExercise: createContentExerciseStore(),
     model: createAnthropicModel(),
     authenticate: s.authenticate,
     rateLimiter: createRateLimiter(),

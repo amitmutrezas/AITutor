@@ -24,7 +24,16 @@ const COPY: Record<
   },
 };
 
-export function AuthForm({ mode, notice }: { mode: Mode; notice?: string }) {
+/** `next` is already sanitised on the server (safeNextPath): a same-site path only. */
+export function AuthForm({
+  mode,
+  notice,
+  next,
+}: {
+  mode: Mode;
+  notice?: string;
+  next?: string;
+}) {
   const copy = COPY[mode];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +54,7 @@ export function AuthForm({ mode, notice }: { mode: Mode; notice?: string }) {
     if (res.ok) {
       const body = (await res.json().catch(() => ({}))) as { status?: string };
       if (mode === "signup" && body.status === "confirm_email") return setConfirmEmail(true);
-      return window.location.assign("/account");
+      return window.location.assign(next ?? "/account");
     }
     if (res.status === 401) return setError("Email or password is not right.");
     if (res.status === 400) {
@@ -115,7 +124,9 @@ export function AuthForm({ mode, notice }: { mode: Mode; notice?: string }) {
         </button>
       </form>
       <p>
-        <Link href={copy.href}>{copy.other}</Link>
+        <Link href={next ? `${copy.href}?next=${encodeURIComponent(next)}` : copy.href}>
+          {copy.other}
+        </Link>
       </p>
     </>
   );
