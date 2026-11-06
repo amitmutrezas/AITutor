@@ -3,11 +3,7 @@ import Link from "next/link";
 import type { RunnableExercise } from "../../lib/runner/types";
 import { useSolved } from "./solved";
 
-export function ExerciseList({
-  exercises,
-}: {
-  exercises: Pick<RunnableExercise, "id" | "title">[];
-}) {
+export function ExerciseList({ exercises }: { exercises: Pick<RunnableExercise, "id" | "title">[] }) {
   const solved = useSolved();
   return (
     <ul className="tests-list" aria-label="Exercises">

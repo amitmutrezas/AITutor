@@ -15,7 +15,13 @@ import {
 import { HintLadder } from "./HintLadder";
 import { markSolved } from "./solved";
 
-export function Workspace({ exercise, nextId }: { exercise: RunnableExercise; nextId?: string }) {
+export function Workspace({
+  exercise,
+  nextId,
+}: {
+  exercise: RunnableExercise;
+  nextId?: string;
+}) {
   const [code, setCode] = useState(exercise.starterCode);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
   const [running, setRunning] = useState(false);
