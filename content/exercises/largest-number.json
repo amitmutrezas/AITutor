@@ -1,0 +1,17 @@
+{
+  "id": "largest-number",
+  "title": "Find the largest number",
+  "statement": "Write a function `largestNumber(numbers)` that returns the biggest number in the array. If the array is empty, return `null`. Do not use `Math.max`; practise doing it with a loop.",
+  "language": "javascript",
+  "starterCode": "function largestNumber(numbers) {\n  // your code here\n}\n",
+  "tests": "test('finds the largest of several', () => { assert.equal(largestNumber([3, 9, 2]), 9); });\ntest('works when all numbers are negative', () => { assert.equal(largestNumber([-5, -2, -9]), -2); });\ntest('single item', () => { assert.equal(largestNumber([7]), 7); });\ntest('largest at the start', () => { assert.equal(largestNumber([10, 1, 4]), 10); });\ntest('empty array gives null', () => { assert.equal(largestNumber([]), null); });\n",
+  "referenceSolution": "function largestNumber(numbers) {\n  if (numbers.length === 0) {\n    return null;\n  }\n  let largest = numbers[0];\n  for (const n of numbers) {\n    if (n > largest) {\n      largest = n;\n    }\n  }\n  return largest;\n}\n",
+  "fallbackHints": [
+    "If someone handed you a list of numbers one at a time, what single number would you keep in your head?",
+    "You need to remember the best number seen so far and compare each new one against it. Also think about what the answer should be when there is nothing to look at.",
+    "Starting the 'best so far' at 0 breaks when every number is negative. Which value from the array itself would be a safer starting point? Handle the empty array before you look at any item.",
+    "Return null early for an empty array. Otherwise start your 'largest so far' as the first item, loop over the array, replace it whenever you meet a bigger number, and return it at the end.",
+    "Begin with `if (numbers.length === 0) { return null; }`, then `let largest = numbers[0];`. Loop with `for (const n of numbers)` and `if (n > largest) { largest = n; }`, then `return largest;`."
+  ],
+  "status": "draft"
+}

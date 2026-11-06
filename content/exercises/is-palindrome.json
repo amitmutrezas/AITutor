@@ -1,0 +1,17 @@
+{
+  "id": "is-palindrome",
+  "title": "Palindrome check",
+  "statement": "Write a function `isPalindrome(text)` that returns `true` if the text reads the same forwards and backwards, and `false` otherwise. Ignore uppercase versus lowercase, and ignore spaces. For example, `'Never odd or even'` is a palindrome. An empty string counts as a palindrome.",
+  "language": "javascript",
+  "starterCode": "function isPalindrome(text) {\n  // your code here\n}\n",
+  "tests": "test('simple palindrome', () => { assert.equal(isPalindrome('level'), true); });\ntest('not a palindrome', () => { assert.equal(isPalindrome('hello'), false); });\ntest('ignores case', () => { assert.equal(isPalindrome('Racecar'), true); });\ntest('ignores spaces', () => { assert.equal(isPalindrome('Never odd or even'), true); });\ntest('empty string is a palindrome', () => { assert.equal(isPalindrome(''), true); });\n",
+  "referenceSolution": "function isPalindrome(text) {\n  const cleaned = text.toLowerCase().split(' ').join('');\n  const backwards = cleaned.split('').reverse().join('');\n  return cleaned === backwards;\n}\n",
+  "fallbackHints": [
+    "If you could flip the text around, how would you decide whether anything changed?",
+    "Compare the text with its own reverse. Before comparing, make the text consistent so that capitals and spaces cannot cause a difference.",
+    "Strings do not have a reverse method of their own, but arrays do. Think about how to turn a string into an array of characters and back. Clean the text first, then compare the cleaned version with the flipped version.",
+    "Lowercase the text and remove the spaces to get a cleaned string. Build a second string from the cleaned one by splitting it into characters, reversing, and joining. Return whether the two strings are equal.",
+    "Use `const cleaned = text.toLowerCase().split(' ').join('');`, then `const backwards = cleaned.split('').reverse().join('');`, and `return cleaned === backwards;`."
+  ],
+  "status": "draft"
+}
