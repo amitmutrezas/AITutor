@@ -1,0 +1,17 @@
+{
+  "id": "count-vowels",
+  "title": "Count the vowels",
+  "statement": "Write a function `countVowels(text)` that returns how many vowels (a, e, i, o, u) appear in the text. Uppercase and lowercase both count. For example, `countVowels('Hello World')` returns 3.",
+  "language": "javascript",
+  "starterCode": "function countVowels(text) {\n  // your code here\n}\n",
+  "tests": "test('counts vowels in a word', () => { assert.equal(countVowels('banana'), 3); });\ntest('ignores case', () => { assert.equal(countVowels('AEIOU'), 5); });\ntest('counts across a sentence', () => { assert.equal(countVowels('Hello World'), 3); });\ntest('no vowels gives 0', () => { assert.equal(countVowels('rhythm'), 0); });\ntest('empty string gives 0', () => { assert.equal(countVowels(''), 0); });\n",
+  "referenceSolution": "function countVowels(text) {\n  const vowels = 'aeiou';\n  let count = 0;\n  for (const character of text.toLowerCase()) {\n    if (vowels.includes(character)) {\n      count += 1;\n    }\n  }\n  return count;\n}\n",
+  "fallbackHints": [
+    "What question do you need to ask about every single letter in the text?",
+    "Go through the text one character at a time and keep a tally. Think about how to make capital and small letters count the same way before you compare.",
+    "You need a way to ask whether a character belongs to a small collection of vowels. A string has a method that answers yes or no to 'do you contain this?'. Decide where the tally should go up.",
+    "Here is a skeleton. Fill in each TODO.\n\nfunction countVowels(text) {\n  // TODO: the five vowels, and a tally that starts at zero\n  for (const character of /* TODO: text with one letter case */) {\n    // TODO: if the vowels contain this character, raise the tally\n  }\n  // TODO: give back the tally\n}",
+    "Here is the full solution.\n\nfunction countVowels(text) {\n  const vowels = 'aeiou';\n  let count = 0;\n  for (const character of text.toLowerCase()) {\n    if (vowels.includes(character)) {\n      count += 1;\n    }\n  }\n  return count;\n}\n\nLowercasing first means one check covers capital and small letters, and `includes` asks whether the character is one of the vowels."
+  ],
+  "status": "draft"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "adult-names",
+  "title": "Names of adults",
+  "statement": "Write a function `adultNames(people)` that takes an array of objects like `{ name: 'Asha', age: 31 }` and returns an array with only the names of people aged 18 or over, in the original order. If nobody qualifies, return an empty array.",
+  "language": "javascript",
+  "starterCode": "function adultNames(people) {\n  // your code here\n}\n",
+  "tests": "test('keeps only adults', () => { assert.deepEqual(adultNames([{ name: 'Asha', age: 31 }, { name: 'Ben', age: 12 }, { name: 'Chen', age: 45 }]), ['Asha', 'Chen']); });\ntest('18 counts as an adult', () => { assert.deepEqual(adultNames([{ name: 'Dee', age: 18 }, { name: 'Eli', age: 17 }]), ['Dee']); });\ntest('nobody qualifies', () => { assert.deepEqual(adultNames([{ name: 'Fay', age: 9 }]), []); });\ntest('empty input', () => { assert.deepEqual(adultNames([]), []); });\n",
+  "referenceSolution": "function adultNames(people) {\n  const names = [];\n  for (const person of people) {\n    if (person.age >= 18) {\n      names.push(person.name);\n    }\n  }\n  return names;\n}\n",
+  "fallbackHints": [
+    "You are being asked to pick some items from a list and then report one detail about each. What are the two separate jobs?",
+    "Look at one person at a time. Each person is an object, so you read their details with dot notation. Decide first whether to include them, and only then think about what to store.",
+    "Check the boundary carefully: exactly 18 should be included. The result holds names only, not whole person objects, so be careful about what you add to your new array.",
+    "Here is a skeleton. Fill in each TODO.\n\nfunction adultNames(people) {\n  // TODO: an empty array for the results\n  for (const person of people) {\n    // TODO: if this person is 18 or older, keep their name only\n  }\n  // TODO: give back the results\n}",
+    "Here is the full solution.\n\nfunction adultNames(people) {\n  const names = [];\n  for (const person of people) {\n    if (person.age >= 18) {\n      names.push(person.name);\n    }\n  }\n  return names;\n}\n\nThe loop looks at each person, the condition keeps age 18 and above, and `push` stores only the name."
+  ],
+  "status": "draft"
+}

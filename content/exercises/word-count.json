@@ -1,0 +1,17 @@
+{
+  "id": "word-count",
+  "title": "Count word frequency",
+  "statement": "Write a function `wordCount(sentence)` that returns an object showing how many times each word appears. Words are separated by single spaces, and counting ignores case, so `'Go go GO'` gives `{ go: 3 }`. An empty string returns an empty object.",
+  "language": "javascript",
+  "starterCode": "function wordCount(sentence) {\n  // your code here\n}\n",
+  "tests": "test('counts repeated words', () => { assert.deepEqual(wordCount('the cat and the hat'), { the: 2, cat: 1, and: 1, hat: 1 }); });\ntest('ignores case', () => { assert.deepEqual(wordCount('Go go GO'), { go: 3 }); });\ntest('single word', () => { assert.deepEqual(wordCount('hello'), { hello: 1 }); });\ntest('empty string gives empty object', () => { assert.deepEqual(wordCount(''), {}); });\ntest('words that match built-in object names', () => { assert.deepEqual(wordCount('Constructor the constructor'), { constructor: 2, the: 1 }); });\n",
+  "referenceSolution": "function wordCount(sentence) {\n  const counts = {};\n  if (sentence === '') {\n    return counts;\n  }\n  for (const word of sentence.toLowerCase().split(' ')) {\n    if (Object.prototype.hasOwnProperty.call(counts, word)) {\n      counts[word] += 1;\n    } else {\n      counts[word] = 1;\n    }\n  }\n  return counts;\n}\n",
+  "fallbackHints": [
+    "Imagine tallying words on paper. What would your tally sheet look like, and when would you add a new row?",
+    "An object can hold a number for each word, with the word as the key. You will need to split the sentence into separate words and treat upper and lower case the same.",
+    "A word that has not been seen yet needs a starting entry. Be careful: every object already carries some inherited names (for example `constructor`), so simply reading a key and checking whether it is empty can give a wrong answer. Ask the object whether it owns that key. Also consider what the empty string should give you.",
+    "Here is a skeleton. Fill in each TODO.\n\nfunction wordCount(sentence) {\n  // TODO: an empty object for the tallies\n  // TODO: nothing to count in an empty sentence\n  for (const word of /* TODO: lowercase words from the sentence */) {\n    // TODO: if this object owns the word, add one; otherwise start it at one\n  }\n  // TODO: give back the tallies\n}",
+    "Here is the full solution.\n\nfunction wordCount(sentence) {\n  const counts = {};\n  if (sentence === '') {\n    return counts;\n  }\n  for (const word of sentence.toLowerCase().split(' ')) {\n    if (Object.prototype.hasOwnProperty.call(counts, word)) {\n      counts[word] += 1;\n    } else {\n      counts[word] = 1;\n    }\n  }\n  return counts;\n}\n\n`hasOwnProperty` only looks at the object's own keys, so words such as `constructor` start at 1 instead of picking up an inherited value."
+  ],
+  "status": "draft"
+}

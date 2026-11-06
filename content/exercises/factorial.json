@@ -1,0 +1,17 @@
+{
+  "id": "factorial",
+  "title": "Factorial with recursion",
+  "statement": "Write a function `factorial(n)` that returns n multiplied by every whole number below it down to 1. For example, `factorial(4)` is 4 x 3 x 2 x 1 = 24. `factorial(0)` is defined as 1. Solve it using recursion, where the function calls itself.",
+  "language": "javascript",
+  "starterCode": "function factorial(n) {\n  // your code here\n}\n",
+  "tests": "test('factorial of 0 is 1', () => { assert.equal(factorial(0), 1); });\ntest('factorial of 1 is 1', () => { assert.equal(factorial(1), 1); });\ntest('factorial of 4', () => { assert.equal(factorial(4), 24); });\ntest('factorial of 6', () => { assert.equal(factorial(6), 720); });\n",
+  "referenceSolution": "function factorial(n) {\n  if (n <= 1) {\n    return 1;\n  }\n  return n * factorial(n - 1);\n}\n",
+  "fallbackHints": [
+    "Notice that 5 x 4 x 3 x 2 x 1 contains a smaller version of the same problem inside it. Can you see which part?",
+    "A recursive function solves a big input by asking itself about a slightly smaller input. It also needs a point where it stops asking. Think about what the smallest easy input is.",
+    "Two pieces are needed: a stopping case that returns an answer straight away, and a step that combines n with the answer for the next smaller number. If the stopping case is missing, the function never ends.",
+    "Here is a skeleton. Fill in each TODO.\n\nfunction factorial(n) {\n  // TODO: the smallest inputs have an answer you can give straight away\n  // TODO: otherwise combine n with the answer for the next smaller number\n}",
+    "Here is the full solution.\n\nfunction factorial(n) {\n  if (n <= 1) {\n    return 1;\n  }\n  return n * factorial(n - 1);\n}\n\nThe base case stops the recursion, and every other call multiplies n by the factorial of a smaller number."
+  ],
+  "status": "draft"
+}

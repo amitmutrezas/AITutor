@@ -1,0 +1,17 @@
+{
+  "id": "fizz-buzz",
+  "title": "FizzBuzz",
+  "statement": "Write a function `fizzBuzz(n)` that returns an array of the numbers from 1 to `n` as strings, except: multiples of 3 become `'Fizz'`, multiples of 5 become `'Buzz'`, and multiples of both become `'FizzBuzz'`. For example, `fizzBuzz(5)` returns `['1', '2', 'Fizz', '4', 'Buzz']`.",
+  "language": "javascript",
+  "starterCode": "function fizzBuzz(n) {\n  // your code here\n}\n",
+  "tests": "test('first five', () => { assert.deepEqual(fizzBuzz(5), ['1', '2', 'Fizz', '4', 'Buzz']); });\ntest('includes FizzBuzz at 15', () => { assert.deepEqual(fizzBuzz(15).slice(11), ['Fizz', '13', '14', 'FizzBuzz']); });\ntest('n of 1', () => { assert.deepEqual(fizzBuzz(1), ['1']); });\ntest('n of 0 gives an empty array', () => { assert.deepEqual(fizzBuzz(0), []); });\n",
+  "referenceSolution": "function fizzBuzz(n) {\n  const result = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 15 === 0) {\n      result.push('FizzBuzz');\n    } else if (i % 3 === 0) {\n      result.push('Fizz');\n    } else if (i % 5 === 0) {\n      result.push('Buzz');\n    } else {\n      result.push(String(i));\n    }\n  }\n  return result;\n}\n",
+  "fallbackHints": [
+    "You will make one answer for each number from 1 up to n. What shape of code repeats a step for a range of numbers?",
+    "The remainder operator tells you whether one number divides evenly into another. The order in which you check the rules matters, so think about which rule is the most specific.",
+    "If you check 'divisible by 3' first, a number like 15 gets the wrong word. Check the case that needs both conditions before the single-condition cases. Also remember every entry must be a string.",
+    "Here is a skeleton. Fill in each TODO.\n\nfunction fizzBuzz(n) {\n  // TODO: an empty array to collect answers\n  for (let i = 1; i <= n; i++) {\n    // TODO: check the 'both' case first, then 3, then 5\n    // TODO: otherwise add the number as a string\n  }\n  // TODO: give back the collected answers\n}",
+    "Here is the full solution.\n\nfunction fizzBuzz(n) {\n  const result = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 15 === 0) {\n      result.push('FizzBuzz');\n    } else if (i % 3 === 0) {\n      result.push('Fizz');\n    } else if (i % 5 === 0) {\n      result.push('Buzz');\n    } else {\n      result.push(String(i));\n    }\n  }\n  return result;\n}\n\nTesting 15 first matters: a multiple of both would otherwise be caught by the 3 or 5 rule."
+  ],
+  "status": "draft"
+}
