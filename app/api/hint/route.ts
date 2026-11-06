@@ -1,6 +1,10 @@
-import { createHintHandler } from "../../../lib/hints/handler";
+import { unavailable } from "../../../lib/api/http";
+import { getHintHandler } from "../../../lib/server/services";
 
 export const dynamic = "force-dynamic";
 
-// TODO(M5): swap the placeholder auth, credits port and exercise store in defaultDeps().
-export const POST = createHintHandler();
+export async function POST(req: Request) {
+  const handler = getHintHandler();
+  if (!handler) return unavailable();
+  return handler(req);
+}

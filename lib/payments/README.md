@@ -19,17 +19,25 @@ Dashboard webhook setup:
 - Events: `subscription.activated`, `subscription.charged`, `subscription.cancelled`,
   `subscription.halted`, `payment.failed`.
 
-Decisions still needed in `lib/payments/plans.ts` (all marked PLACEHOLDER): prices (`pricePaise`),
-`monthlyCredits`, `totalCount`. `RAZORPAY_*` names should be added to `.env.example` by someone
-allowed to edit it (the secret-guard hook blocks `.env*` edits for agents).
+Decisions still needed in `lib/config/index.ts` (all marked PLACEHOLDER): prices (`pricePaise`),
+`monthlyCredits`, `totalCount`. These now live in `lib/config` (`PLANS`, keys `free`, `basic`, `advanced`),
+the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names are in `.env.example`.
 
-## Status
+## Status (M5)
 
-- Persistence is behind `PaymentStore` (`store.ts`). Only the in-memory implementation exists.
-  `TODO(M5)`: Supabase implementation, with plan change, credit grant and `markProcessed` in one
-  transaction via `lib/credits`.
-- `/api/razorpay/subscribe` reads the user from the `x-user-id` header as a placeholder.
-  `TODO(M5)`: use the real session. Until then the checkout page cannot complete a real purchase.
+- Persistence is behind `PaymentStore` (`store.ts`). `supabase-store.ts` is the durable implementation:
+  every method is one Postgres function (`supabase/migrations/0002`), so each is one transaction.
+  `InMemoryPaymentStore` is a test fake only; the running app has no in-memory fallback and the
+  webhook and subscribe routes answer a generic 503 when the Supabase env vars are missing.
+- `applyEvent` claims the event id (primary key on `payment_events`), checks the event belongs to the
+  learner's current subscription (the row with that Razorpay subscription id and user), applies lifecycle
+  ordering (cancelled is terminal; events older than the last applied one are ignored), then changes plan
+  and status and resets credits, all in one transaction.
+- `/api/razorpay/subscribe` uses the real session (`lib/auth`). The checkout attempt is claimed in the
+  database before Razorpay is called: a pending checkout for the same plan is reused, an active
+  subscription is refused (409), and a pending checkout for another plan is closed at Razorpay.
+- Known limit: a learner who pays a checkout that was closed by a plan switch is not matched by the
+  webhook (logged as `webhook_unknown_subscription`) and needs a manual refund.
 - Signature formats follow Razorpay docs (checked via Context7): webhook = HMAC SHA256 of the raw
   body with the webhook secret, header `X-Razorpay-Signature`, event id in `X-Razorpay-Event-Id`;
   subscription checkout = HMAC SHA256 of `razorpay_payment_id|razorpay_subscription_id` with the

@@ -1,37 +1,63 @@
 import { z } from "zod";
+import { failed, json, readBody, unavailable } from "../api/http";
+import { requireUser } from "../auth/session";
+import type { Authenticate } from "../auth/types";
 import { PAYMENT_PLANS, PLAN_IDS, razorpayPlanId } from "./plans";
+import { cancelRazorpaySubscription, razorpayAuthHeader } from "./razorpay";
+import type { PaymentStore } from "./store";
 
 export const subscribeBody = z.strictObject({ planId: z.enum(PLAN_IDS) });
 
 export interface SubscribeDeps {
   keyId: string | undefined;
   keySecret: string | undefined;
+  authenticate: Authenticate;
+  store: PaymentStore | null;
   env?: Record<string, string | undefined>;
   fetchFn?: typeof fetch;
 }
 
-const json = (body: unknown, status: number) => Response.json(body, { status });
-
-/** Creates a Razorpay subscription. The client never decides a plan change: only the webhook does (P1). */
+/**
+ * Starts a Razorpay subscription checkout. Idempotent: the checkout attempt is claimed in the
+ * database BEFORE Razorpay is called, so a double click or a retry reuses the pending checkout and
+ * a learner with an active subscription is refused. The client never decides a plan change: only
+ * the signature-verified webhook does (P1).
+ */
 export async function handleSubscribe(request: Request, deps: SubscribeDeps): Promise<Response> {
-  // TODO(M5): replace the x-user-id header with the real signed-in session user. Until then the
-  // header is trusted only outside production, so production fails closed with a generic 401.
-  const userId = process.env.NODE_ENV !== "production" ? request.headers.get("x-user-id") : null;
-  if (!userId) return json({ error: "Sign in required" }, 401);
+  const auth = await requireUser(request, deps.authenticate);
+  if (!auth.ok) return auth.response;
+  const userId = auth.user.id;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return json({ error: "Invalid request" }, 400);
-  }
-  const parsed = subscribeBody.safeParse(raw);
-  if (!parsed.success) return json({ error: "Invalid request" }, 400);
+  const body = await readBody(request, subscribeBody);
+  if (!body.ok) return body.response;
+  const planId = body.data.planId;
 
-  const planId = parsed.data.planId;
   const rzpPlan = razorpayPlanId(planId, deps.env);
-  if (!deps.keyId || !deps.keySecret || !rzpPlan) {
-    return json({ error: "Payments unavailable" }, 503);
+  if (!deps.keyId || !deps.keySecret || !rzpPlan || !deps.store) return unavailable();
+  const { keyId, keySecret, store } = deps;
+
+  let claim;
+  try {
+    claim = await store.claimCheckout(userId, planId);
+  } catch {
+    return failed();
+  }
+  if (claim.kind === "active_exists") {
+    return json(409, { error: "You already have an active subscription" });
+  }
+  if (claim.kind === "in_progress") {
+    return json(409, { error: "Checkout is already starting. Try again in a moment" });
+  }
+  if (claim.kind === "reuse") {
+    return json(200, { subscriptionId: claim.razorpaySubscriptionId, keyId, planId });
+  }
+
+  if (claim.supersededSubscriptionId) {
+    // Best effort: close the unpaid checkout for the other plan so it cannot be paid later by accident.
+    await cancelRazorpaySubscription(
+      { keyId, keySecret, fetchFn: deps.fetchFn },
+      claim.supersededSubscriptionId,
+    );
   }
 
   try {
@@ -39,7 +65,7 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Basic ${Buffer.from(`${deps.keyId}:${deps.keySecret}`).toString("base64")}`,
+        authorization: razorpayAuthHeader(keyId, keySecret),
       },
       body: JSON.stringify({
         plan_id: rzpPlan,
@@ -48,11 +74,19 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
         notes: { user_id: userId, plan: planId },
       }),
     });
-    if (!res.ok) return json({ error: "Could not start checkout" }, 502);
-    const data = z.object({ id: z.string().min(1) }).safeParse(await res.json());
-    if (!data.success) return json({ error: "Could not start checkout" }, 502);
-    return json({ subscriptionId: data.data.id, keyId: deps.keyId, planId }, 200);
+    const data = res.ok ? z.object({ id: z.string().min(1) }).safeParse(await res.json()) : null;
+    if (!data?.success) {
+      await store.abandonCheckout(claim.claimId);
+      return json(502, { error: "Could not start checkout" });
+    }
+    await store.attachSubscription(claim.claimId, data.data.id);
+    return json(200, { subscriptionId: data.data.id, keyId, planId });
   } catch {
-    return json({ error: "Could not start checkout" }, 502);
+    try {
+      await store.abandonCheckout(claim.claimId);
+    } catch {
+      // The claim expires on its own (see payments_claim_checkout), so this is safe to ignore.
+    }
+    return json(502, { error: "Could not start checkout" });
   }
 }

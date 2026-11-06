@@ -170,3 +170,46 @@ main.wide {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* M5: sign in/up and account */
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.field {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--paper);
+  border: 2px solid var(--mid);
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+.btn.danger {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+.saved-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+}
+.code-view {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  font: 0.8125rem/1.55 var(--mono);
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+dt {
+  font-weight: 600;
+}
+dd {
+  margin: 0 0 0.5rem;
+}

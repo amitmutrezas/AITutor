@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { isPlanId, planIdFromRazorpayPlan, type PlanId } from "./plans";
+import { isPlanId, PAYMENT_PLANS, planIdFromRazorpayPlan, type PlanId } from "./plans";
 import { verifyWebhookSignature } from "./signature";
-import type { PaymentStore } from "./store";
+import type { ApplyEventInput, PaymentStore } from "./store";
 
 const subscriptionEvent = z.object({
   event: z.enum([
@@ -10,6 +10,8 @@ const subscriptionEvent = z.object({
     "subscription.cancelled",
     "subscription.halted",
   ]),
+  // Unix seconds when Razorpay created the event; used to ignore out-of-order deliveries.
+  created_at: z.number().int().positive().optional(),
   payload: z.object({
     subscription: z.object({
       entity: z.object({
@@ -22,8 +24,6 @@ const subscriptionEvent = z.object({
   }),
 });
 
-const paymentFailedEvent = z.object({ event: z.literal("payment.failed") });
-
 export interface WebhookDeps {
   store: PaymentStore;
   webhookSecret: string | undefined;
@@ -32,8 +32,13 @@ export interface WebhookDeps {
 
 const ok = () => new Response(null, { status: 200 });
 const bad = () => new Response(null, { status: 400 });
+const retry = () => new Response(null, { status: 500 });
 
-/** Verifies the signature on the RAW body before anything is parsed (POLICY 3.3, P2). */
+/**
+ * Verifies the signature on the RAW body before anything is parsed (POLICY 3.3, P2). All state
+ * changes happen in one `store.applyEvent` transaction that also claims the event id, so a replay
+ * is a no-op and a failure leaves nothing half-applied (Razorpay retries on 500).
+ */
 export async function handleRazorpayWebhook(
   request: Request,
   deps: WebhookDeps,
@@ -45,8 +50,6 @@ export async function handleRazorpayWebhook(
   const eventId = request.headers.get("x-razorpay-event-id");
   if (!eventId) return bad();
 
-  if (await deps.store.hasProcessedEvent(eventId)) return ok();
-
   let json: unknown;
   try {
     json = JSON.parse(rawBody);
@@ -54,43 +57,59 @@ export async function handleRazorpayWebhook(
     return bad();
   }
 
-  if (paymentFailedEvent.safeParse(json).success) {
-    // P3: a failed payment never changes the plan or credits.
-    await deps.store.markProcessed(eventId);
-    return ok();
-  }
+  const input = toApplyInput(eventId, json, deps.env);
+  if (input === "invalid") return bad();
 
+  try {
+    const outcome = await deps.store.applyEvent(input);
+    if (outcome === "unknown_subscription") {
+      // Signed, but not the learner's current subscription. Acknowledge, but leave a trace for
+      // reconciliation. Ids only: no emails, no code.
+      console.warn(
+        JSON.stringify({ event: "webhook_unknown_subscription", eventId, userId: input.userId }),
+      );
+    }
+    return ok();
+  } catch {
+    return retry();
+  }
+}
+
+function toApplyInput(
+  eventId: string,
+  json: unknown,
+  env: Record<string, string | undefined> | undefined,
+): ApplyEventInput | "invalid" {
   const parsed = subscriptionEvent.safeParse(json);
   if (!parsed.success) {
-    // Valid signature but an event we do not act on: acknowledge so Razorpay stops retrying.
-    await deps.store.markProcessed(eventId);
-    return ok();
+    // payment.failed (P3: never changes plan or credits) and any other event we do not act on:
+    // claim the id and acknowledge so Razorpay stops retrying.
+    return { eventId, kind: "ignore" };
   }
 
-  const { event, payload } = parsed.data;
+  const { event, payload, created_at } = parsed.data;
   const sub = payload.subscription.entity;
-  const userId = sub.notes.user_id;
   const planId: PlanId | null =
-    planIdFromRazorpayPlan(sub.plan_id, deps.env) ??
+    planIdFromRazorpayPlan(sub.plan_id, env) ??
     (sub.notes.plan && isPlanId(sub.notes.plan) ? sub.notes.plan : null);
-  if (!planId) return bad();
+  if (!planId) return "invalid";
 
-  switch (event) {
-    case "subscription.activated":
-      // Status only: credits come from the first subscription.charged, one per charge.
-      await deps.store.setSubscription(userId, planId, "active", sub.id);
-      break;
-    case "subscription.charged":
-      await deps.store.setSubscription(userId, planId, "active", sub.id);
-      await deps.store.grantMonthlyCredits(userId, planId);
-      break;
-    case "subscription.cancelled":
-      await deps.store.setSubscription(userId, planId, "cancelled", sub.id);
-      break;
-    case "subscription.halted":
-      await deps.store.setSubscription(userId, planId, "halted", sub.id);
-      break;
-  }
-  await deps.store.markProcessed(eventId);
-  return ok();
+  const status =
+    event === "subscription.cancelled"
+      ? "cancelled"
+      : event === "subscription.halted"
+        ? "halted"
+        : "active";
+  return {
+    eventId,
+    kind: "subscription",
+    userId: sub.notes.user_id,
+    planId,
+    razorpaySubscriptionId: sub.id,
+    status,
+    // Status only on activated; credits come from each charged event (C4: reset, no rollover).
+    grantCredits:
+      event === "subscription.charged" ? PAYMENT_PLANS[planId].monthlyCredits : undefined,
+    eventAt: created_at ? new Date(created_at * 1000) : undefined,
+  };
 }

@@ -1,62 +1,152 @@
 import type { PlanId } from "./plans";
-import { PAYMENT_PLANS } from "./plans";
 
-export type SubscriptionStatus = "active" | "cancelled" | "halted";
+/** pending: checkout started, not paid. cancelled is terminal. */
+export type SubscriptionStatus = "pending" | "active" | "halted" | "cancelled";
 
+export type ClaimResult =
+  | { kind: "claimed"; claimId: string; supersededSubscriptionId?: string }
+  | { kind: "reuse"; razorpaySubscriptionId: string }
+  | { kind: "active_exists" }
+  | { kind: "in_progress" };
+
+export type ApplyOutcome = "duplicate" | "ignored" | "unknown_subscription" | "stale" | "applied";
+
+export interface ApplyEventInput {
+  eventId: string;
+  /** "ignore" only claims the event id (events we do not act on, such as payment.failed). */
+  kind: "ignore" | "subscription";
+  userId?: string;
+  planId?: PlanId;
+  razorpaySubscriptionId?: string;
+  status?: "active" | "halted" | "cancelled";
+  /** When set with status "active", the balance is RESET to this integer (C4, no rollover). */
+  grantCredits?: number;
+  /** The event's own timestamp, used for lifecycle ordering. */
+  eventAt?: Date;
+}
+
+export interface LiveSubscription {
+  razorpaySubscriptionId: string | null;
+  status: SubscriptionStatus;
+  planId: PlanId;
+}
+
+/**
+ * Durable payment state (POLICY 3.1, 3.3). `applyEvent` is ONE transaction: it claims the event id
+ * (unique), checks the event belongs to the learner's current subscription, applies lifecycle
+ * ordering, changes plan/status and resets credits. An error rolls back all of it so a retry works.
+ */
 export interface PaymentStore {
-  hasProcessedEvent(eventId: string): Promise<boolean>;
-  markProcessed(eventId: string): Promise<void>;
-  setSubscription(
-    userId: string,
-    planId: PlanId,
-    status: SubscriptionStatus,
-    razorpaySubscriptionId: string,
-  ): Promise<void>;
-  /** RESETS the balance to the plan's monthly allowance (integer). No rollover (C4). */
-  grantMonthlyCredits(userId: string, planId: PlanId): Promise<void>;
+  /** Idempotent checkout start: at most one live subscription per learner. */
+  claimCheckout(userId: string, planId: PlanId): Promise<ClaimResult>;
+  attachSubscription(claimId: string, razorpaySubscriptionId: string): Promise<void>;
+  /** Releases a claim when Razorpay could not create the subscription. */
+  abandonCheckout(claimId: string): Promise<void>;
+  applyEvent(input: ApplyEventInput): Promise<ApplyOutcome>;
+  liveSubscription(userId: string): Promise<LiveSubscription | null>;
 }
 
 export interface MemorySubscription {
+  id: string;
+  userId: string;
   planId: PlanId;
   status: SubscriptionStatus;
-  razorpaySubscriptionId: string;
+  razorpaySubscriptionId: string | null;
+  createdAt: number;
+  lastEventAt: number | null;
 }
 
-/** In-memory implementation for tests and local development. */
+const LIVE: SubscriptionStatus[] = ["pending", "active", "halted"];
+const STALE_CLAIM_MS = 2 * 60_000;
+
+/** In-memory fake that mirrors the semantics of the SQL functions in supabase/migrations/0002. */
 export class InMemoryPaymentStore implements PaymentStore {
   readonly processed = new Set<string>();
-  readonly subscriptions = new Map<string, MemorySubscription>();
+  readonly rows: MemorySubscription[] = [];
   readonly credits = new Map<string, number>();
+  private seq = 0;
 
-  async hasProcessedEvent(eventId: string) {
-    return this.processed.has(eventId);
-  }
-  async markProcessed(eventId: string) {
-    this.processed.add(eventId);
-  }
-  async setSubscription(
-    userId: string,
-    planId: PlanId,
-    status: SubscriptionStatus,
-    razorpaySubscriptionId: string,
-  ) {
-    this.subscriptions.set(userId, { planId, status, razorpaySubscriptionId });
-  }
-  async grantMonthlyCredits(userId: string, planId: PlanId) {
-    this.credits.set(userId, PAYMENT_PLANS[planId].monthlyCredits);
-  }
-}
+  constructor(private now: () => number = Date.now) {}
 
-let defaultStore: PaymentStore | undefined;
+  /** The latest subscription row per user (live rows win), keyed by user id. */
+  get subscriptions(): Map<string, MemorySubscription> {
+    const m = new Map<string, MemorySubscription>();
+    for (const r of this.rows) {
+      const cur = m.get(r.userId);
+      if (!cur || LIVE.includes(r.status) || !LIVE.includes(cur.status)) m.set(r.userId, r);
+    }
+    return m;
+  }
 
-/**
- * Returns null in production: the in-memory store is not durable or transactional, so callers
- * must fail closed (generic 503) rather than lose or double-apply money events.
- * TODO(M5): return the Supabase-backed store here. Plan change, credit reset and markProcessed
- * must happen in one database transaction via lib/credits (POLICY 3.1, 3.3).
- */
-export function getPaymentStore(): PaymentStore | null {
-  if (process.env.NODE_ENV === "production") return null;
-  defaultStore ??= new InMemoryPaymentStore();
-  return defaultStore;
+  private live(userId: string) {
+    return this.rows.find((r) => r.userId === userId && LIVE.includes(r.status));
+  }
+
+  async claimCheckout(userId: string, planId: PlanId): Promise<ClaimResult> {
+    const row = this.live(userId);
+    let superseded: string | undefined;
+    if (row) {
+      if (row.status === "active") return { kind: "active_exists" };
+      if (row.status === "pending" && row.planId === planId) {
+        if (row.razorpaySubscriptionId) {
+          return { kind: "reuse", razorpaySubscriptionId: row.razorpaySubscriptionId };
+        }
+        if (row.createdAt > this.now() - STALE_CLAIM_MS) return { kind: "in_progress" };
+      }
+      superseded = row.razorpaySubscriptionId ?? undefined;
+      row.status = "cancelled";
+    }
+    const id = `claim_${++this.seq}`;
+    this.rows.push({
+      id,
+      userId,
+      planId,
+      status: "pending",
+      razorpaySubscriptionId: null,
+      createdAt: this.now(),
+      lastEventAt: null,
+    });
+    return { kind: "claimed", claimId: id, supersededSubscriptionId: superseded };
+  }
+
+  async attachSubscription(claimId: string, razorpaySubscriptionId: string) {
+    const row = this.rows.find((r) => r.id === claimId);
+    if (row && row.status === "pending" && row.razorpaySubscriptionId === null) {
+      row.razorpaySubscriptionId = razorpaySubscriptionId;
+    }
+  }
+
+  async abandonCheckout(claimId: string) {
+    const row = this.rows.find((r) => r.id === claimId);
+    if (row && row.status === "pending" && row.razorpaySubscriptionId === null) {
+      row.status = "cancelled";
+    }
+  }
+
+  async applyEvent(input: ApplyEventInput): Promise<ApplyOutcome> {
+    if (this.processed.has(input.eventId)) return "duplicate";
+    this.processed.add(input.eventId);
+    if (input.kind === "ignore") return "ignored";
+
+    const row = this.rows.find((r) => r.razorpaySubscriptionId === input.razorpaySubscriptionId);
+    if (!row || row.userId !== input.userId) return "unknown_subscription";
+    if (row.status === "cancelled") return "stale";
+    const at = input.eventAt?.getTime() ?? null;
+    if (at !== null && row.lastEventAt !== null && at < row.lastEventAt) return "stale";
+
+    row.status = input.status!;
+    row.planId = input.planId!;
+    if (at !== null) row.lastEventAt = at;
+    if (input.status === "active" && input.grantCredits !== undefined) {
+      this.credits.set(row.userId, input.grantCredits);
+    }
+    return "applied";
+  }
+
+  async liveSubscription(userId: string): Promise<LiveSubscription | null> {
+    const r = this.live(userId);
+    return r
+      ? { razorpaySubscriptionId: r.razorpaySubscriptionId, status: r.status, planId: r.planId }
+      : null;
+  }
 }
