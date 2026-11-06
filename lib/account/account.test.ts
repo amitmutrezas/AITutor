@@ -5,7 +5,7 @@ import { InMemoryHintLog } from "../hints/hint-log";
 import { InMemoryPaymentStore } from "../payments/store";
 import { InMemorySavedCode } from "../saved-code/service";
 import { createAccountHandlers } from "./handler";
-import { InMemoryAccounts } from "./service";
+import { createSupabaseAccounts, InMemoryAccounts } from "./service";
 
 const auth: Authenticate = async (req) => {
   const id = req.headers.get("x-test-user");
@@ -203,5 +203,60 @@ describe("A3: delete account", () => {
     });
     expect((await h.DELETE(r)).status).toBe(404);
     expect(payments.deleting.size).toBe(0);
+  });
+
+  it("A3/P1: a second DELETE while one is in progress gets 409 and cannot clear the first one's marker", async () => {
+    const ref: { h?: Awaited<ReturnType<typeof setup>>["h"] } = {};
+    let second = 0;
+    let markerAfterSecond: boolean | undefined;
+    const ref2: { payments?: InMemoryPaymentStore } = {};
+    const fetchFn = (async () => {
+      // The first request is at its Razorpay cancel (which fails); a second DELETE overlaps it.
+      second = (await ref.h!.DELETE(req("DELETE", confirm))).status;
+      markerAfterSecond = ref2.payments!.deleting.has("u1");
+      return new Response("x", { status: 500 });
+    }) as unknown as typeof fetch;
+    const { h, payments, accounts } = await setup({ liveSub: "active", fetchFn });
+    ref.h = h;
+    ref2.payments = payments;
+    expect((await h.DELETE(req("DELETE", confirm))).status).toBe(502);
+    expect(second).toBe(409);
+    expect(markerAfterSecond).toBe(true); // still blocking checkout while the first attempt is working
+    expect(payments.deleting.has("u1")).toBe(false); // the owner cleared its own marker
+    expect(await accounts.get("u1")).not.toBeNull();
+  });
+
+  it("A3/P1: cancelDeletion is compare-and-set on the token", async () => {
+    const { accounts, payments } = await setup();
+    const a = await accounts.beginDeletion("u1");
+    if (!a || a.inProgress) throw new Error("expected to begin");
+    expect(await accounts.beginDeletion("u1")).toEqual({ inProgress: true });
+    expect(await accounts.cancelDeletion("u1", "tok_other")).toBe(false);
+    expect(payments.deleting.has("u1")).toBe(true);
+    await expect(accounts.delete("u1", "tok_other")).rejects.toThrow();
+    expect(await accounts.cancelDeletion("u1", a.token)).toBe(true);
+    expect(payments.deleting.has("u1")).toBe(false);
+    expect(await accounts.cancelDeletion("u1", a.token)).toBe(false); // already cleared
+  });
+
+  it("A3/P1: the Supabase adapter parses in_progress and passes the token to cancel and delete", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const data: Record<string, unknown> = {
+      account_begin_delete: { in_progress: true },
+      account_cancel_delete: false,
+      account_delete: null,
+    };
+    const client = {
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        calls.push([fn, args]);
+        return { data: data[fn], error: null };
+      },
+    };
+    const a = createSupabaseAccounts(client);
+    expect(await a.beginDeletion("u")).toEqual({ inProgress: true });
+    expect(await a.cancelDeletion("u", "t1")).toBe(false);
+    await a.delete("u", "t1");
+    expect(calls[1]).toEqual(["account_cancel_delete", { p_user: "u", p_token: "t1" }]);
+    expect(calls[2]).toEqual(["account_delete", { p_user: "u", p_token: "t1" }]);
   });
 });

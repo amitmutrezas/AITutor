@@ -96,6 +96,18 @@ describe("M5 migration 0002", () => {
     );
   });
 
+  it("A3/P1: begin rejects a second active deletion; cancel and delete are compare-and-set on the token", () => {
+    const begin =
+      m2.match(/create function public\.account_begin_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(begin).toMatch(/in_progress/);
+    expect(begin).toMatch(/interval '10 minutes'/);
+    const cancel =
+      m2.match(/create function public\.account_cancel_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(cancel).toMatch(/deleting_token = p_token/);
+    const del = m2.match(/create function public\.account_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(del).toMatch(/is distinct from p_token/);
+  });
+
   it("A3: account_delete requires account_begin_delete and locks in the documented order", () => {
     const fn = m2.match(/create function public\.account_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
     expect(fn).toMatch(/account_begin_delete must run first/);

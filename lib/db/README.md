@@ -36,7 +36,14 @@ All app access to the database goes through SECURITY DEFINER functions executabl
 - Payments: `payments_claim_checkout`, `payments_attach_subscription`, `payments_abandon_checkout`,
   `payments_apply_event`, `payments_live_subscription`. One live subscription per user (partial unique index).
 - Saved code: `saved_code_upsert`, `saved_code_list`, `saved_code_delete`, `saved_code_delete_all`.
-- Account: `account_get`, `account_delete` (deletes `auth.users`; everything cascades).
+- Account: `account_get`; deletion is three calls: `account_begin_delete(user)` (locks the profile, sets
+  `profiles.deleting_at` + `deleting_token`, returns `{token, live}`, or `{in_progress: true}` if another deletion holds
+  a marker younger than 10 minutes, or null for no account), then the Razorpay cancel, then `account_delete(user, token)`
+  (deletes `auth.users`; everything cascades). On a failed cancel, `account_cancel_delete(user, token)` clears the
+  marker only if the token is still the caller's (compare-and-set, returns boolean).
+- Checkout also has `payments_close_checkout` (closes a superseded row once its Razorpay subscription is cancelled).
+  Internal helpers, not granted to any role: `_credits_lock_balance` and `_credits_release_locked`.
+- Lock order for all of the above: see `lib/payments/README.md`.
 - `hint_log_record` stores the code hash only (N3).
 - Exercise ids in `hint_log` and `saved_code` are no longer foreign keys: exercises are content files for now.
 

@@ -46,13 +46,18 @@ export function createAccountHandlers(deps: AccountDeps) {
       const body = await readBody(req, deleteAccountBody);
       if (!body.ok) return body.response;
       const userId = auth.user.id;
-      let begun = false;
+      let token: string | null = null;
       try {
         // 1. In the database: lock the account and set the deleting marker. From here no checkout can
         //    start or attach, so the subscription list returned below is complete.
         const state = await deps.accounts.beginDeletion(userId);
         if (!state) return json(404, { error: "Not found" });
-        begun = true;
+        if (state.inProgress) {
+          // Another deletion owns the marker. Do not touch it (a cancel here could reopen checkout for it).
+          return json(409, { error: "Account deletion is already in progress" });
+        }
+        const owned = state.token;
+        token = owned;
         // 2. Cancel at Razorpay. ANY row with a subscription id blocks deletion if it cannot be
         //    cancelled, including a pending checkout (it could still be paid after the account is gone).
         //    On failure the marker is cleared: the account stays and works as before.
@@ -62,17 +67,17 @@ export function createAccountHandlers(deps: AccountDeps) {
             state.live.razorpaySubscriptionId,
           );
           if (!cancelled) {
-            await deps.accounts.cancelDeletion(userId);
+            await deps.accounts.cancelDeletion(userId, owned);
             return json(502, {
               error: "We could not cancel your subscription, so your account was not deleted",
             });
           }
         }
         // 3. Delete (cascade).
-        await deps.accounts.delete(userId);
+        await deps.accounts.delete(userId, owned);
         return json(200, { deleted: true });
       } catch {
-        if (begun) await deps.accounts.cancelDeletion(userId).catch(() => undefined);
+        if (token) await deps.accounts.cancelDeletion(userId, token).catch(() => undefined);
         return failed();
       }
     },

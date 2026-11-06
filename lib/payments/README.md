@@ -78,8 +78,12 @@ Rules that follow from it:
 - Checkout vs deletion: `payments_claim_checkout` and `payments_attach_subscription` lock the profile row and refuse while
   `profiles.deleting_at` is under 10 minutes old. Deletion is three steps: `account_begin_delete` (locks the profile, sets the
   marker, returns the live subscription), then the Razorpay cancel, then `account_delete` (requires the marker, locks 1-4,
-  cascades). If the cancel fails the marker is cleared (`account_cancel_delete`) and the account is unchanged. If the process
+  cascades). If the cancel fails the marker is cleared and the account is unchanged. If the process
   dies mid-way the marker expires on its own.
+- Overlapping deletions: `account_begin_delete` returns `{in_progress: true}` while a marker younger than 10 minutes exists,
+  and the handler answers 409 without touching it. The marker has an owner (`deleting_token`, returned by begin);
+  `account_cancel_delete(user, token)` and `account_delete(user, token)` act only for that token, so a failing attempt can
+  never clear a marker another attempt set (which would let a subscribe slip in before the cascade).
 - Handlers that mix Razorpay with the DB (`lib/payments/subscribe.ts`, `lib/account/handler.ts`) call the Razorpay side only
   between two of these single-transaction steps and define what is true if the next step fails.
 

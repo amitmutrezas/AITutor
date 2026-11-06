@@ -33,6 +33,8 @@ insert into public.profiles (id, email)
 -- payments_attach_subscription refuse while it is recent, so no checkout can start between "list the
 -- live subscriptions to cancel" and the cascade. It expires after 10 minutes if a deletion is abandoned.
 alter table public.profiles add column deleting_at timestamptz;
+-- Owner of the marker: account_begin_delete returns it, and cancel/delete only act for the attempt that holds it.
+alter table public.profiles add column deleting_token uuid;
 
 -- ---------------------------------------------------------------------------
 -- Plans: rows exist for the foreign key. The monthly amount actually granted is passed in by the app
@@ -494,40 +496,53 @@ $$;
 
 -- Step 1 of deletion. Takes the profile lock, sets the deleting marker (so no checkout can start or attach
 -- from now on) and returns the live subscription to cancel at Razorpay: {live: {...} | null}.
--- Returns null if the account does not exist.
+-- Returns null if the account does not exist, {in_progress: true} if another deletion holds a recent
+-- marker (a second concurrent DELETE is rejected, never allowed to share or clear the first one's marker),
+-- otherwise {token, live}. The token is the proof of ownership for account_cancel_delete / account_delete.
 create function public.account_begin_delete(p_user uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
+declare
+  v_deleting timestamptz;
+  v_token uuid := gen_random_uuid();
 begin
-  perform 1 from public.profiles where id = p_user for update;
+  select deleting_at into v_deleting from public.profiles where id = p_user for update;
   if not found then
     return null;
   end if;
-  update public.profiles set deleting_at = now() where id = p_user;
-  return jsonb_build_object('live', (
+  if v_deleting is not null and v_deleting > now() - interval '10 minutes' then
+    return jsonb_build_object('in_progress', true);
+  end if;
+  update public.profiles set deleting_at = now(), deleting_token = v_token where id = p_user;
+  return jsonb_build_object('token', v_token, 'live', (
     select to_jsonb(s) from (
       select razorpay_subscription_id, status, plan_id from public.subscriptions
        where user_id = p_user and status in ('pending', 'active', 'halted')
     ) s));
 end $$;
 
--- Called when the Razorpay cancel failed: the account stays, checkout is allowed again.
-create function public.account_cancel_delete(p_user uuid) returns void
-language sql security definer set search_path = public as $$
-  update public.profiles set deleting_at = null where id = p_user;
-$$;
+-- Called when the Razorpay cancel failed: the account stays, checkout is allowed again. Compare-and-set:
+-- clears the marker only if it is still the caller's (returns whether it did).
+create function public.account_cancel_delete(p_user uuid, p_token uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.profiles set deleting_at = null, deleting_token = null
+   where id = p_user and deleting_token = p_token;
+  return found;
+end $$;
 
 -- Step 2: only after account_begin_delete. Locks everything in the documented order, then deletes
 -- auth.users; the cascade removes profile, balance, reservations, ledger, hint log, saved code, subscriptions.
-create function public.account_delete(p_user uuid) returns void
+create function public.account_delete(p_user uuid, p_token uuid) returns void
 language plpgsql security definer set search_path = public as $$
 declare
   v_deleting timestamptz;
+  v_owner uuid;
 begin
-  select deleting_at into v_deleting from public.profiles where id = p_user for update;
+  select deleting_at, deleting_token into v_deleting, v_owner from public.profiles where id = p_user for update;
   if not found then
     return;
   end if;
-  if v_deleting is null then
+  if v_deleting is null or v_owner is distinct from p_token then
     raise exception 'account_begin_delete must run first';
   end if;
   perform 1 from public.subscriptions where user_id = p_user for update;
