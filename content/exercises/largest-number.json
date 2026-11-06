@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction largestNumber(numbers) {\n  // TODO: an empty array has no largest value, so leave early\n  // TODO: a variable for the best value so far, starting from a real item\n  for (const n of numbers) {\n    // TODO: is n better than the best so far? If so, replace it\n  }\n  // TODO: give back the best value\n}",
     "Here is the full solution.\n\nfunction largestNumber(numbers) {\n  if (numbers.length === 0) {\n    return null;\n  }\n  let largest = numbers[0];\n  for (const n of numbers) {\n    if (n > largest) {\n      largest = n;\n    }\n  }\n  return largest;\n}\n\nStarting from the first item (not 0) keeps negative arrays correct, and the early return handles the empty array."
   ],
-  "status": "draft"
+  "status": "verified"
 }

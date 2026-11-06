@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction reverseString(text) {\n  // TODO: a variable to build the answer in, starting empty\n  for (const character of text) {\n    // TODO: join the character to the answer so it ends up first\n  }\n  // TODO: give back the answer\n}",
     "Here is the full solution.\n\nfunction reverseString(text) {\n  let result = '';\n  for (const character of text) {\n    result = character + result;\n  }\n  return result;\n}\n\nEach character is added in front of the result, so the first character ends up last."
   ],
-  "status": "draft"
+  "status": "verified"
 }

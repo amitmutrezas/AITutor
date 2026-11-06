@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction factorial(n) {\n  // TODO: the smallest inputs have an answer you can give straight away\n  // TODO: otherwise combine n with the answer for the next smaller number\n}",
     "Here is the full solution.\n\nfunction factorial(n) {\n  if (n <= 1) {\n    return 1;\n  }\n  return n * factorial(n - 1);\n}\n\nThe base case stops the recursion, and every other call multiplies n by the factorial of a smaller number."
   ],
-  "status": "draft"
+  "status": "verified"
 }
