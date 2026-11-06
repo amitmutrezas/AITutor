@@ -13,5 +13,5 @@
     "Create a total that starts at zero, loop over the array, add each item to the total, then return the total after the loop.",
     "Use `let total = 0;`, then `for (const n of numbers) { total += n; }`, and finally `return total;`."
   ],
-  "status": "live"
+  "status": "draft"
 }

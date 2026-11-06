@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction isPalindrome(text) {\n  // TODO: a cleaned copy: lowercase, no spaces\n  // TODO: a flipped copy of the cleaned one (string -> array -> reverse -> string)\n  // TODO: are the two copies equal? Give that back\n}",
     "Here is the full solution.\n\nfunction isPalindrome(text) {\n  const cleaned = text.toLowerCase().split(' ').join('');\n  const backwards = cleaned.split('').reverse().join('');\n  return cleaned === backwards;\n}\n\nCleaning first removes case and spaces, then a string equals its reverse exactly when it is a palindrome."
   ],
-  "status": "live"
+  "status": "draft"
 }
