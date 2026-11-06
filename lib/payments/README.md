@@ -84,6 +84,18 @@ Rules that follow from it:
   and the handler answers 409 without touching it. The marker has an owner (`deleting_token`, returned by begin);
   `account_cancel_delete(user, token)` and `account_delete(user, token)` act only for that token, so a failing attempt can
   never clear a marker another attempt set (which would let a subscribe slip in before the cascade).
+- Lease (10 minutes) and token fencing: a token is valid only while its marker is within the lease. (a) `account_delete`
+  raises `deletion lease expired` for a lapsed marker, even if nothing else touched the row. (b) `payments_claim_checkout`
+  and `payments_attach_subscription`, which hold the profile lock, clear `deleting_at` and `deleting_token` when they find a
+  lapsed marker, so the old token is dead the moment checkout reopens. (c) `account_begin_delete` taking over a lapsed marker
+  rotates the token. Result: a stalled worker that resumes after the lease can neither delete (a, b) nor clear (CAS) anything,
+  and a subscription attached after the lease can never be cascaded without a cancel. If the lease lapses between the Razorpay
+  cancel and `account_delete`, the handler returns 500, the account stays, and the user retries (begin finds the live
+  subscription again).
+- Paths reviewed for the same class: `account_cancel_delete` (CAS, harmless on a lapsed token), `account_delete` (token plus
+  lease), `account_begin_delete` (in-progress check uses the lease, takeover rotates), claim and attach (fence), the handler's
+  catch (cancels with its own token only), webhook `payments_apply_event` (never inserts rows, so it cannot create a
+  subscription during a lapsed marker).
 - Handlers that mix Razorpay with the DB (`lib/payments/subscribe.ts`, `lib/account/handler.ts`) call the Razorpay side only
   between two of these single-transaction steps and define what is true if the next step fails.
 

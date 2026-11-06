@@ -74,6 +74,11 @@ export class InMemoryAccounts implements AccountPort {
       live: live && { razorpaySubscriptionId: live.razorpaySubscriptionId, status: live.status },
     };
   }
+  /** Test hook for the 10-minute lease lapsing and a checkout reopening, which fences the old token. */
+  expireLease(userId: string) {
+    this.tokens.delete(userId);
+    this.opts.payments?.deleting.delete(userId);
+  }
   async cancelDeletion(userId: string, token: string) {
     if (this.tokens.get(userId) !== token) return false;
     this.tokens.delete(userId);

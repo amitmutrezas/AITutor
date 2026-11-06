@@ -24,8 +24,17 @@ export function createSupabaseServerAuth(
   });
 }
 
-export function createSupabaseAuthProvider(store: CookieStore): AuthProvider | null {
-  const supabase = createSupabaseServerAuth(store);
+/** The part of the Supabase client the provider uses (so tests can pass a fake). */
+export type SupabaseAuthLike = Pick<
+  NonNullable<ReturnType<typeof createSupabaseServerAuth>>["auth"],
+  "signUp" | "signInWithPassword" | "signOut"
+>;
+
+export function createSupabaseAuthProvider(
+  store: CookieStore,
+  client?: { auth: SupabaseAuthLike },
+): AuthProvider | null {
+  const supabase = client ?? createSupabaseServerAuth(store);
   if (!supabase) return null;
   return {
     async signUp(email, password, confirmRedirectTo) {
@@ -42,7 +51,10 @@ export function createSupabaseAuthProvider(store: CookieStore): AuthProvider | n
       return !error;
     },
     async signOut() {
-      await supabase.auth.signOut();
+      // signOut resolves with { error } instead of throwing; a failure means the session may still be
+      // valid, so surface it (the handler turns a throw into a 500).
+      const { error } = await supabase.auth.signOut();
+      if (error) throw new Error("sign-out failed");
     },
   };
 }

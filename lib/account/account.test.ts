@@ -259,4 +259,30 @@ describe("A3: delete account", () => {
     expect(calls[1]).toEqual(["account_cancel_delete", { p_user: "u", p_token: "t1" }]);
     expect(calls[2]).toEqual(["account_delete", { p_user: "u", p_token: "t1" }]);
   });
+
+  it("A3/P1: a worker whose lease lapsed cannot delete: the account and a newly attached subscription survive", async () => {
+    const fetchFn = (async () => Response.json({})) as unknown as typeof fetch;
+    const { accounts, payments } = await setup({ fetchFn });
+    const a = await accounts.beginDeletion("u1");
+    if (!a || a.inProgress) throw new Error("expected to begin");
+    accounts.expireLease("u1"); // 10 minutes pass; checkout reopens (the claim fences the token)
+    const claim = await payments.claimCheckout("u1", "basic");
+    if (claim.kind !== "claimed") throw new Error("expected claim");
+    expect(await payments.attachSubscription(claim.claimId, "sub_new")).toBe(true);
+    await expect(accounts.delete("u1", a.token)).rejects.toThrow();
+    expect(await accounts.get("u1")).not.toBeNull();
+    expect(payments.rows).toHaveLength(1);
+  });
+
+  it("A3/P1: if the lease lapses mid-request the handler fails with 500 and does not report deleted", async () => {
+    const { h, accounts } = await setup({ liveSub: "active" });
+    const orig = accounts.delete.bind(accounts);
+    accounts.delete = async (id, token) => {
+      accounts.expireLease(id);
+      return orig(id, token);
+    };
+    const res = await h.DELETE(req("DELETE", confirm));
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(await accounts.get("u1")).not.toBeNull();
+  });
 });

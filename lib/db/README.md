@@ -40,7 +40,11 @@ All app access to the database goes through SECURITY DEFINER functions executabl
   `profiles.deleting_at` + `deleting_token`, returns `{token, live}`, or `{in_progress: true}` if another deletion holds
   a marker younger than 10 minutes, or null for no account), then the Razorpay cancel, then `account_delete(user, token)`
   (deletes `auth.users`; everything cascades). On a failed cancel, `account_cancel_delete(user, token)` clears the
-  marker only if the token is still the caller's (compare-and-set, returns boolean).
+  marker only if the token is still the caller's (compare-and-set, returns boolean). The marker is a 10-minute lease:
+  `account_delete` rejects a lapsed one, and `payments_claim_checkout` / `payments_attach_subscription` clear a lapsed
+  marker (token included), so a stalled deletion can never cascade a later subscription.
+- Auth: `supabase.auth.signOut()` resolves with `{ error }`; `lib/auth/supabase-provider.ts` turns that into a thrown
+  error, so `/api/auth/signout` returns 500 and the account page does not redirect.
 - Checkout also has `payments_close_checkout` (closes a superseded row once its Razorpay subscription is cancelled).
   Internal helpers, not granted to any role: `_credits_lock_balance` and `_credits_release_locked`.
 - Lock order for all of the above: see `lib/payments/README.md`.

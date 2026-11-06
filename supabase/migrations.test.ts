@@ -108,6 +108,16 @@ describe("M5 migration 0002", () => {
     expect(del).toMatch(/is distinct from p_token/);
   });
 
+  it("A3/P1: an expired deletion lease is fenced: claim/attach rotate the token, account_delete rejects a lapsed lease", () => {
+    for (const name of ["payments_claim_checkout", "payments_attach_subscription"]) {
+      const fn =
+        m2.match(new RegExp(`create function public\\.${name}\\b[\\s\\S]*?end \\$\\$;`))?.[0] ?? "";
+      expect(fn, name).toMatch(/set deleting_at = null, deleting_token = null/);
+    }
+    const del = m2.match(/create function public\.account_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(del).toMatch(/deletion lease expired/);
+  });
+
   it("A3: account_delete requires account_begin_delete and locks in the documented order", () => {
     const fn = m2.match(/create function public\.account_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
     expect(fn).toMatch(/account_begin_delete must run first/);

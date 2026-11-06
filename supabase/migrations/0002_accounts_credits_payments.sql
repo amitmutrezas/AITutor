@@ -296,7 +296,15 @@ declare
 begin
   -- Level 1 lock: serialises with account deletion (account_begin_delete takes the same row lock).
   select deleting_at into v_deleting from public.profiles where id = p_user for update;
-  if not found or (v_deleting is not null and v_deleting > now() - interval '10 minutes') then
+  if not found then
+    return jsonb_build_object('outcome', 'account_deleting');
+  end if;
+  if v_deleting is not null and v_deleting <= now() - interval '10 minutes' then
+    -- The deletion lease lapsed: fence its token so a stalled worker can no longer call account_delete.
+    update public.profiles set deleting_at = null, deleting_token = null where id = p_user;
+    v_deleting := null;
+  end if;
+  if v_deleting is not null then
     return jsonb_build_object('outcome', 'account_deleting');
   end if;
   select * into v_row from public.subscriptions
@@ -354,7 +362,15 @@ begin
     return false;
   end if;
   select deleting_at into v_deleting from public.profiles where id = v_user for update;
-  if not found or (v_deleting is not null and v_deleting > now() - interval '10 minutes') then
+  if not found then
+    return false;
+  end if;
+  if v_deleting is not null and v_deleting <= now() - interval '10 minutes' then
+    -- The deletion lease lapsed: fence its token so a stalled worker can no longer call account_delete.
+    update public.profiles set deleting_at = null, deleting_token = null where id = v_user;
+    v_deleting := null;
+  end if;
+  if v_deleting is not null then
     return false;
   end if;
   update public.subscriptions
@@ -512,6 +528,7 @@ begin
   if v_deleting is not null and v_deleting > now() - interval '10 minutes' then
     return jsonb_build_object('in_progress', true);
   end if;
+  -- A lapsed marker is taken over here: the token is rotated, so the previous owner's token is dead.
   update public.profiles set deleting_at = now(), deleting_token = v_token where id = p_user;
   return jsonb_build_object('token', v_token, 'live', (
     select to_jsonb(s) from (
@@ -544,6 +561,11 @@ begin
   end if;
   if v_deleting is null or v_owner is distinct from p_token then
     raise exception 'account_begin_delete must run first';
+  end if;
+  if v_deleting <= now() - interval '10 minutes' then
+    -- Checkout may have reopened after the lease lapsed; deleting now could cascade a subscription
+    -- that was never cancelled at Razorpay. The caller must begin again.
+    raise exception 'deletion lease expired';
   end if;
   perform 1 from public.subscriptions where user_id = p_user for update;
   perform 1 from public.credit_balances where user_id = p_user for update;

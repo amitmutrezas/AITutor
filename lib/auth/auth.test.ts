@@ -7,6 +7,7 @@ import {
   type AuthProvider,
 } from "./credentials";
 import { requireUser } from "./session";
+import { createSupabaseAuthProvider } from "./supabase-provider";
 
 const post = (path: string, body: unknown) =>
   new Request(`http://localhost${path}`, { method: "POST", body: JSON.stringify(body) });
@@ -130,5 +131,31 @@ describe("A1: email sign-up and sign-in", () => {
     );
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("secret");
+  });
+});
+
+describe("A1: Supabase provider sign-out", () => {
+  const store = { getAll: () => [], set: () => undefined };
+  const fake = (signOut: () => Promise<{ error: unknown }>) =>
+    ({
+      auth: { signUp: async () => ({}), signInWithPassword: async () => ({}), signOut },
+    }) as unknown as Parameters<typeof createSupabaseAuthProvider>[1];
+
+  it("A1: a signOut that resolves with { error } makes the handler fail, not return 200", async () => {
+    const p = createSupabaseAuthProvider(
+      store,
+      fake(async () => ({ error: { message: "x" } })),
+    );
+    const res = await handleSignOut(p!);
+    expect(res.status).toBe(500);
+    expect(await res.json()).not.toHaveProperty("status", "signed_out");
+  });
+
+  it("A1: a clean signOut is 200", async () => {
+    const p = createSupabaseAuthProvider(
+      store,
+      fake(async () => ({ error: null })),
+    );
+    expect((await handleSignOut(p!)).status).toBe(200);
   });
 });

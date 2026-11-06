@@ -48,7 +48,8 @@ export function AccountClient() {
   }
 
   async function signOut() {
-    await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
+    const res = await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
+    if (!res?.ok) return setMessage("Could not sign out. Please try again.");
     window.location.assign("/signin");
   }
 
@@ -59,7 +60,12 @@ export function AccountClient() {
       body: JSON.stringify({ confirm: DELETE_PHRASE }),
     }).catch(() => null);
     if (res?.ok) {
-      await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
+      const out = await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
+      if (!out?.ok) {
+        return setMessage(
+          "Your account was deleted, but we could not sign you out. Please close this browser window.",
+        );
+      }
       return window.location.assign("/");
     }
     setMessage(
