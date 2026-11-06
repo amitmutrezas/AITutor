@@ -23,6 +23,13 @@ export function Workspace({
     const o = await runInSandbox(code, exercise.tests);
     setOutcome(o);
     setRunning(false);
+    // A2: save the latest code on run. Best effort and silent: signed-out visitors get a 401 and
+    // nothing is stored; the run result never depends on it.
+    void fetch("/api/saved-code", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ exerciseId: exercise.id, code }),
+    }).catch(() => undefined);
     if (allPassed(o)) markSolved(exercise.id);
   }
 

@@ -1,12 +1,13 @@
 import { handleRazorpayWebhook } from "../../../../lib/payments/webhook";
-import { getPaymentStore } from "../../../../lib/payments/store";
+import { getServices } from "../../../../lib/server/services";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // Unauthenticated by design: the signature is the authentication (secure-endpoint rule 1).
 export async function POST(request: Request) {
-  const store = getPaymentStore();
-  // Fail closed in production until M5 supplies the durable transactional store (lib/credits).
+  const store = getServices()?.payments;
+  // Fail closed: without the durable transactional store, money events must not be acknowledged.
   if (!store) return new Response(null, { status: 503 });
   return handleRazorpayWebhook(request, {
     store,

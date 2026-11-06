@@ -19,18 +19,89 @@ Dashboard webhook setup:
 - Events: `subscription.activated`, `subscription.charged`, `subscription.cancelled`,
   `subscription.halted`, `payment.failed`.
 
-Decisions still needed in `lib/payments/plans.ts` (all marked PLACEHOLDER): prices (`pricePaise`),
-`monthlyCredits`, `totalCount`. `RAZORPAY_*` names should be added to `.env.example` by someone
-allowed to edit it (the secret-guard hook blocks `.env*` edits for agents).
+Decisions still needed in `lib/config/index.ts` (all marked PLACEHOLDER): prices (`pricePaise`),
+`monthlyCredits`, `totalCount`. These now live in `lib/config` (`PLANS`, keys `free`, `basic`, `advanced`),
+the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names are in `.env.example`.
 
-## Status
+## Status (M5)
 
-- Persistence is behind `PaymentStore` (`store.ts`). Only the in-memory implementation exists.
-  `TODO(M5)`: Supabase implementation, with plan change, credit grant and `markProcessed` in one
-  transaction via `lib/credits`.
-- `/api/razorpay/subscribe` reads the user from the `x-user-id` header as a placeholder.
-  `TODO(M5)`: use the real session. Until then the checkout page cannot complete a real purchase.
+- Persistence is behind `PaymentStore` (`store.ts`). `supabase-store.ts` is the durable implementation:
+  every method is one Postgres function (`supabase/migrations/0002`), so each is one transaction.
+  `InMemoryPaymentStore` is a test fake only; the running app has no in-memory fallback and the
+  webhook and subscribe routes answer a generic 503 when the Supabase env vars are missing.
+- `applyEvent` claims the event id (primary key on `payment_events`), checks the event belongs to the
+  learner's current subscription (the row with that Razorpay subscription id and user), applies lifecycle
+  ordering (cancelled is terminal; events older than the last applied one are ignored), then changes plan
+  and status and resets credits, all in one transaction.
+- A webhook for a subscription id no row has yet (it can beat `attachSubscription`) does not claim the event id and
+  answers a retryable 503, so Razorpay's retry is applied once the id is attached.
+- Ordering rule: Razorpay calls and DB writes are never assumed to succeed together. Switching plans cancels the
+  old subscription at Razorpay first and only then closes the old row (`payments_close_checkout`); a failed cancel
+  stops the request with nothing changed. If Razorpay created a subscription but its id cannot be stored, the new
+  subscription is cancelled; if that fails too the claim row is kept and `razorpay_subscription_unattached` is
+  logged with the id. Account deletion is blocked if any row with a Razorpay subscription id (even pending) cannot
+  be cancelled there. A renewal reset (`credits_reset`) expires open credit reservations with no refund (C4).
+- `/api/cron/reconcile-credits` (vercel.json, every 5 minutes, `Authorization: Bearer $CRON_SECRET`) releases stale
+  credit reservations. Vercel Cron needs a plan that allows sub-daily schedules.
+- `/api/razorpay/subscribe` uses the real session (`lib/auth`). The checkout attempt is claimed in the
+  database before Razorpay is called: a pending checkout for the same plan is reused, an active
+  subscription is refused (409), and a pending checkout for another plan is closed at Razorpay.
+- Known limit: a learner who pays a checkout that was closed by a plan switch is not matched by the
+  webhook (logged as `webhook_unknown_subscription`) and needs a manual refund.
 - Signature formats follow Razorpay docs (checked via Context7): webhook = HMAC SHA256 of the raw
   body with the webhook secret, header `X-Razorpay-Signature`, event id in `X-Razorpay-Event-Id`;
   subscription checkout = HMAC SHA256 of `razorpay_payment_id|razorpay_subscription_id` with the
   key secret.
+
+## Lock order (single, global) and who takes what
+
+Every SQL function below runs in one transaction and takes locks only in this order, possibly skipping levels.
+Two transactions therefore never wait on each other in a cycle. This is also asserted statically in
+`supabase/migrations.test.ts` and exercised (sequentially) with a throwaway Postgres; concurrent interleavings
+cannot be run in unit tests, so the order itself is the safety argument. When adding a function, take its locks in
+this order or do not add it.
+
+| Level | Lock                                            | Taken by                                                                                                                                                       |
+| ----- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `profiles` row (`FOR UPDATE`)                   | `account_begin_delete`, `account_cancel_delete`, `account_delete`, `payments_claim_checkout`, `payments_attach_subscription`                                   |
+| 2     | `subscriptions` row(s)                          | `payments_claim_checkout`, `payments_apply_event`, `account_delete` (`payments_close_checkout` and `payments_abandon_checkout` touch one row by id)            |
+| 3     | `credit_balances` row (`_credits_lock_balance`) | `credits_reserve`, `credits_release`, `credits_settle_hint`, `credits_reconcile`, `credits_reset` (also reached from `payments_apply_event`), `account_delete` |
+| 4     | `credit_reservations` rows                      | `_credits_release_locked` (via release and reconcile), `credits_settle_hint`, `credits_reset` (expires them), `account_delete`                                 |
+| 5     | `payment_events` insert (unique event id)       | `payments_apply_event`, always last                                                                                                                            |
+
+Rules that follow from it:
+
+- A function that only knows a reservation id reads its `user_id` without a lock, takes the balance lock (3), and only then
+  locks the reservation (4). `credits_reconcile` visits candidates ordered by user, so two reconciles cannot cross.
+- `credits_reset` takes the balance lock first. A concurrent `credits_reserve` either committed before (its reservation is
+  expired by the reset, no refund, C4) or waits and then reserves from the new allowance.
+- Checkout vs deletion: `payments_claim_checkout` and `payments_attach_subscription` lock the profile row and refuse while
+  `profiles.deleting_at` is under 10 minutes old. Deletion is three steps: `account_begin_delete` (locks the profile, sets the
+  marker, returns the live subscription), then the Razorpay cancel, then `account_delete` (requires the marker, locks 1-4,
+  cascades). If the cancel fails the marker is cleared and the account is unchanged. If the process
+  dies mid-way the marker expires on its own.
+- Overlapping deletions: `account_begin_delete` returns `{in_progress: true}` while a marker younger than 10 minutes exists,
+  and the handler answers 409 without touching it. The marker has an owner (`deleting_token`, returned by begin);
+  `account_cancel_delete(user, token)` and `account_delete(user, token)` act only for that token, so a failing attempt can
+  never clear a marker another attempt set (which would let a subscribe slip in before the cascade).
+- Lease (10 minutes) and token fencing: a token is valid only while its marker is within the lease. (a) `account_delete`
+  raises `deletion lease expired` for a lapsed marker, even if nothing else touched the row. (b) `payments_claim_checkout`
+  and `payments_attach_subscription`, which hold the profile lock, clear `deleting_at` and `deleting_token` when they find a
+  lapsed marker, so the old token is dead the moment checkout reopens. (c) `account_begin_delete` taking over a lapsed marker
+  rotates the token. Result: a stalled worker that resumes after the lease can neither delete (a, b) nor clear (CAS) anything,
+  and a subscription attached after the lease can never be cascaded without a cancel. If the lease lapses between the Razorpay
+  cancel and `account_delete`, the handler returns 500, the account stays, and the user retries (begin finds the live
+  subscription again).
+- Paths reviewed for the same class: `account_cancel_delete` (CAS, harmless on a lapsed token), `account_delete` (token plus
+  lease), `account_begin_delete` (in-progress check uses the lease, takeover rotates), claim and attach (fence), the handler's
+  catch (cancels with its own token only), webhook `payments_apply_event` (never inserts rows, so it cannot create a
+  subscription during a lapsed marker).
+- Handlers that mix Razorpay with the DB (`lib/payments/subscribe.ts`, `lib/account/handler.ts`) call the Razorpay side only
+  between two of these single-transaction steps and define what is true if the next step fails.
+
+Inventory of SQL functions that touch balance, reservations, subscriptions or the profile row: `credits_get_balance`
+(no lock, read), `credits_reserve`, `credits_release`, `credits_settle_hint`, `credits_reconcile`, `credits_reset`,
+`payments_claim_checkout`, `payments_attach_subscription`, `payments_close_checkout`, `payments_abandon_checkout`,
+`payments_apply_event`, `payments_live_subscription` (read), `account_get` (read), `account_begin_delete`,
+`account_cancel_delete`, `account_delete`. Handlers: `/api/hint` (reserve, settle or release), `/api/razorpay/webhook`
+(`applyEvent`), `/api/razorpay/subscribe`, `/api/account` DELETE, `/api/cron/reconcile-credits`.

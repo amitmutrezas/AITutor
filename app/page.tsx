@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main>
@@ -7,7 +9,8 @@ export default function Home() {
         at a time, from a gentle nudge to a full reveal only when you need it.
       </p>
       <p>
-        <a href="#plans">See plans (coming soon)</a>
+        <Link href="/exercises">Exercises</Link> · <Link href="/plans">Plans</Link> ·{" "}
+        <Link href="/signin">Sign in</Link> · <Link href="/account">Account</Link>
       </p>
     </main>
   );

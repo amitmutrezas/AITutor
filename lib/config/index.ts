@@ -36,9 +36,59 @@ export const HINTS = {
   rateLimit: { maxRequests: 20, windowMs: 60_000 },
 } as const;
 
-/** PLACEHOLDER plans: prices and credits are not decided (PLAN.md decision 1). */
+/** Plan keys. "free" has no subscription; basic and advanced are Razorpay plans (P1). */
+export const PLAN_KEYS = ["free", "basic", "advanced"] as const;
+export type PlanKey = (typeof PLAN_KEYS)[number];
+
+/**
+ * Single source of truth for plans (POLICY 3.5, C1). Prices and credit amounts are PLACEHOLDERS:
+ * they are not decided (PLAN.md decision 1). `maxLevel` is the highest hint level a plan may
+ * request (C5: a free account is limited to levels 1-2).
+ */
 export const PLANS = {
-  free: { name: "Free (placeholder)", monthlyCredits: 0, maxLevel: 2 },
-  starter: { name: "Starter (placeholder)", monthlyCredits: 30, maxLevel: 5 },
-  pro: { name: "Pro (placeholder)", monthlyCredits: 100, maxLevel: 5 },
+  free: {
+    name: "Free",
+    monthlyCredits: 0,
+    maxLevel: 2,
+    pricePaise: null,
+    totalCount: 0,
+    razorpayPlanEnv: null,
+  },
+  basic: {
+    name: "Basic",
+    monthlyCredits: 30, // PLACEHOLDER
+    maxLevel: 5,
+    pricePaise: null, // PLACEHOLDER: null = not decided yet
+    totalCount: 120, // PLACEHOLDER: billing cycles for a new subscription
+    razorpayPlanEnv: "RAZORPAY_PLAN_ID_BASIC",
+  },
+  advanced: {
+    name: "Advanced",
+    monthlyCredits: 100, // PLACEHOLDER
+    maxLevel: 5,
+    pricePaise: null, // PLACEHOLDER
+    totalCount: 120, // PLACEHOLDER
+    razorpayPlanEnv: "RAZORPAY_PLAN_ID_ADVANCED",
+  },
+} as const satisfies Record<
+  PlanKey,
+  {
+    name: string;
+    monthlyCredits: number;
+    maxLevel: number;
+    pricePaise: number | null;
+    totalCount: number;
+    razorpayPlanEnv: string | null;
+  }
+>;
+
+/** Saved code (A2) and account limits. */
+export const SAVED_CODE = {
+  maxChars: 20_000,
+  maxExerciseIdChars: 100,
+} as const;
+
+/** Credit reservations (C3). A reservation neither released nor settled after this long is given back. */
+export const CREDITS = {
+  reservationTimeoutSeconds: 300,
 } as const;
