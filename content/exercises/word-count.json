@@ -13,5 +13,5 @@
     "Here is a skeleton. Fill in each TODO.\n\nfunction wordCount(sentence) {\n  // TODO: an empty object for the tallies\n  // TODO: nothing to count in an empty sentence\n  for (const word of /* TODO: lowercase words from the sentence */) {\n    // TODO: if this object owns the word, add one; otherwise start it at one\n  }\n  // TODO: give back the tallies\n}",
     "Here is the full solution.\n\nfunction wordCount(sentence) {\n  const counts = {};\n  if (sentence === '') {\n    return counts;\n  }\n  for (const word of sentence.toLowerCase().split(' ')) {\n    if (Object.prototype.hasOwnProperty.call(counts, word)) {\n      counts[word] += 1;\n    } else {\n      counts[word] = 1;\n    }\n  }\n  return counts;\n}\n\n`hasOwnProperty` only looks at the object's own keys, so words such as `constructor` start at 1 instead of picking up an inherited value."
   ],
-  "status": "draft"
+  "status": "live"
 }
