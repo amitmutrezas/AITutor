@@ -14,7 +14,13 @@ describe("config", () => {
 
   it("C5: only the free plan is capped at levels 1-2; paid plans reach Reveal", () => {
     expect(PLANS.free.maxLevel).toBe(2);
-    expect(PLANS.starter.maxLevel).toBe(HINT_LEVELS.length);
-    expect(PLANS.pro.maxLevel).toBe(HINT_LEVELS.length);
+    expect(PLANS.basic.maxLevel).toBe(HINT_LEVELS.length);
+    expect(PLANS.advanced.maxLevel).toBe(HINT_LEVELS.length);
+  });
+
+  it("C1: plan names are free, basic, advanced with integer monthly credits", () => {
+    expect(Object.keys(PLANS)).toEqual(["free", "basic", "advanced"]);
+    for (const p of Object.values(PLANS)) expect(Number.isInteger(p.monthlyCredits)).toBe(true);
+    expect(PLANS.free.monthlyCredits).toBe(0);
   });
 });

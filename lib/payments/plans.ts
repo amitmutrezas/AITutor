@@ -1,5 +1,6 @@
-// Plan catalogue for payments. All values are PLACEHOLDER until Amit decides
-// prices and credits (PLAN.md decision 1). UI must read from here (POLICY 3.5, P4).
+// Plan catalogue for payments, derived from lib/config (single source of truth). Values are
+// PLACEHOLDER until Amit decides prices and credits (PLAN.md decision 1). UI reads from here (POLICY 3.5, P4).
+import { PLANS } from "../config";
 
 export const PLAN_IDS = ["basic", "advanced"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -17,23 +18,22 @@ export interface PaymentPlan {
   totalCount: number;
 }
 
+function fromConfig(id: PlanId): PaymentPlan {
+  const p = PLANS[id];
+  return {
+    id,
+    name: p.name,
+    monthlyCredits: p.monthlyCredits,
+    pricePaise: p.pricePaise,
+    razorpayPlanEnv: p.razorpayPlanEnv,
+    totalCount: p.totalCount,
+  };
+}
+
+/** Derived from lib/config, the single source of truth for plans. */
 export const PAYMENT_PLANS: Record<PlanId, PaymentPlan> = {
-  basic: {
-    id: "basic",
-    name: "Basic",
-    monthlyCredits: 30, // PLACEHOLDER
-    pricePaise: null, // PLACEHOLDER
-    razorpayPlanEnv: "RAZORPAY_PLAN_ID_BASIC",
-    totalCount: 120, // PLACEHOLDER
-  },
-  advanced: {
-    id: "advanced",
-    name: "Advanced",
-    monthlyCredits: 100, // PLACEHOLDER
-    pricePaise: null, // PLACEHOLDER
-    razorpayPlanEnv: "RAZORPAY_PLAN_ID_ADVANCED",
-    totalCount: 120, // PLACEHOLDER
-  },
+  basic: fromConfig("basic"),
+  advanced: fromConfig("advanced"),
 };
 
 export function isPlanId(value: string): value is PlanId {
