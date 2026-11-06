@@ -29,6 +29,11 @@ insert into public.profiles (id, email)
   select id, coalesce(email, '') from auth.users
   on conflict (id) do nothing;
 
+-- Set while an account deletion is in progress (account_begin_delete). payments_claim_checkout and
+-- payments_attach_subscription refuse while it is recent, so no checkout can start between "list the
+-- live subscriptions to cancel" and the cascade. It expires after 10 minutes if a deletion is abandoned.
+alter table public.profiles add column deleting_at timestamptz;
+
 -- ---------------------------------------------------------------------------
 -- Plans: rows exist for the foreign key. The monthly amount actually granted is passed in by the app
 -- from lib/config (single source of truth), so these zeros are informational only.
@@ -73,8 +78,30 @@ create index credit_reservations_open_idx on public.credit_reservations (created
 alter table public.credit_reservations enable row level security; -- no policies: service role only
 revoke all on public.credit_reservations from anon, authenticated;
 
--- Gives back one reservation. Idempotent: returns true only the first time (status was 'reserved').
-create function public.credits_release(p_reservation uuid) returns boolean
+-- ---------------------------------------------------------------------------
+-- LOCK ORDER (one order, everywhere; see also lib/payments/README.md). A transaction takes locks only
+-- in this order and may skip levels, so two transactions can never wait on each other in a cycle:
+--   1. profiles row            (account_begin_delete, account_cancel_delete, account_delete,
+--                               payments_claim_checkout, payments_attach_subscription)
+--   2. subscriptions rows      (payments_claim_checkout, payments_apply_event, account_delete)
+--   3. credit_balances row     (_credits_lock_balance: reserve, release, settle, reconcile, reset)
+--   4. credit_reservations rows (release, settle, reconcile, reset, account_delete)
+--   5. payment_events          (payments_apply_event, inserted last)
+-- Functions that only know a reservation id first read its user_id WITHOUT a lock, take the balance
+-- lock (3), and only then lock the reservation row (4).
+-- ---------------------------------------------------------------------------
+
+-- Takes the per-user balance row lock (level 3). Creates the row at zero if missing.
+create function public._credits_lock_balance(p_user uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.credit_balances (user_id, balance) values (p_user, 0) on conflict (user_id) do nothing;
+  perform 1 from public.credit_balances where user_id = p_user for update;
+end $$;
+
+-- Releases one reservation. The caller MUST hold the balance lock for the reservation's user.
+-- p_min_age_seconds, when set, only releases reservations at least that old (reconcile).
+create function public._credits_release_locked(p_reservation uuid, p_min_age_seconds integer default null) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare
   v_res public.credit_reservations%rowtype;
@@ -83,29 +110,47 @@ begin
   if not found or v_res.status <> 'reserved' then
     return false;
   end if;
+  if p_min_age_seconds is not null and v_res.created_at >= now() - make_interval(secs => p_min_age_seconds) then
+    return false;
+  end if;
   update public.credit_reservations set status = 'released', resolved_at = now() where id = v_res.id;
-  insert into public.credit_balances (user_id, balance) values (v_res.user_id, v_res.cost)
-  on conflict (user_id) do update set balance = public.credit_balances.balance + excluded.balance, updated_at = now();
+  update public.credit_balances set balance = balance + v_res.cost, updated_at = now() where user_id = v_res.user_id;
   insert into public.credit_ledger (user_id, delta, reason) values (v_res.user_id, v_res.cost, 'hint_release');
   return true;
 end $$;
 
--- Releases reservations still 'reserved' after p_timeout_seconds (optionally for one user). Idempotent and
--- safe to run concurrently (rows are locked with SKIP LOCKED). Returns how many were released.
+-- Gives back one reservation. Idempotent: returns true only the first time (status was 'reserved').
+create function public.credits_release(p_reservation uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_user uuid;
+begin
+  select user_id into v_user from public.credit_reservations where id = p_reservation; -- unlocked read
+  if not found then
+    return false;
+  end if;
+  perform public._credits_lock_balance(v_user);
+  return public._credits_release_locked(p_reservation);
+end $$;
+
+-- Releases reservations still 'reserved' after p_timeout_seconds (optionally for one user). Idempotent.
+-- Each candidate is released under its user's balance lock; candidates are visited in a fixed order
+-- (user, age) so two concurrent reconciles cannot deadlock. Returns how many were released.
 create function public.credits_reconcile(p_timeout_seconds integer, p_user uuid default null) returns integer
 language plpgsql security definer set search_path = public as $$
 declare
-  v_id uuid;
+  c record;
   v_count integer := 0;
 begin
-  for v_id in
-    select id from public.credit_reservations
+  for c in
+    select id, user_id from public.credit_reservations
      where status = 'reserved'
        and created_at < now() - make_interval(secs => p_timeout_seconds)
        and (p_user is null or user_id = p_user)
-     for update skip locked
+     order by user_id, created_at, id
   loop
-    if public.credits_release(v_id) then
+    perform public._credits_lock_balance(c.user_id);
+    if public._credits_release_locked(c.id, p_timeout_seconds) then
       v_count := v_count + 1;
     end if;
   end loop;
@@ -113,7 +158,8 @@ begin
 end $$;
 
 -- Takes p_cost credits if the balance covers it and returns the reservation id, or null and changes nothing (C2).
--- Stale reservations of this user are reconciled first, so a lost release heals on the next request.
+-- Takes the balance lock first, then gives back this user's stale reservations, so a lost release heals on
+-- the next request. The conditional UPDATE cannot take the balance below zero.
 create function public.credits_reserve(p_user uuid, p_cost integer, p_timeout_seconds integer) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
@@ -122,6 +168,7 @@ begin
   if p_cost is null or p_cost <= 0 then
     raise exception 'cost must be a positive integer';
   end if;
+  perform public._credits_lock_balance(p_user);
   perform public.credits_reconcile(p_timeout_seconds, p_user);
   update public.credit_balances
      set balance = balance - p_cost, updated_at = now()
@@ -135,17 +182,24 @@ begin
 end $$;
 
 -- C3: ONE transaction records the hash-only hint log row and marks the reservation settled (the charge
--- stands). Returns false, changing nothing, if the reservation is no longer 'reserved' (already released
--- by reconciliation); the caller then treats the hint as uncharged. Any error rolls back both writes.
+-- stands). Returns false, changing nothing, if the reservation is no longer 'reserved' (released by
+-- reconciliation or expired by a renewal reset); the caller then treats the hint as uncharged. Any error
+-- rolls back both writes.
 create function public.credits_settle_hint(
   p_reservation uuid, p_exercise text, p_level integer, p_code_hash text,
   p_tokens_in integer, p_tokens_out integer, p_fallback boolean
 ) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare
+  v_user uuid;
   v_res public.credit_reservations%rowtype;
   v_log uuid;
 begin
+  select user_id into v_user from public.credit_reservations where id = p_reservation; -- unlocked read
+  if not found then
+    return false;
+  end if;
+  perform public._credits_lock_balance(v_user);
   select * into v_res from public.credit_reservations where id = p_reservation for update;
   if not found or v_res.status <> 'reserved' then
     return false;
@@ -169,13 +223,14 @@ begin
   if p_amount is null or p_amount < 0 then
     raise exception 'amount must be a non-negative integer';
   end if;
-  insert into public.credit_balances (user_id, balance) values (p_user, 0) on conflict (user_id) do nothing;
+  -- Balance lock FIRST (the same as reserve, release, settle and reconcile), so a concurrent reserve either
+  -- commits before this point (and its reservation is expired below) or waits and then sees the new balance.
+  perform public._credits_lock_balance(p_user);
   -- C4: reservations from the old cycle are closed WITHOUT refund, in this same transaction, so a later
-  -- release or reconcile cannot add old-cycle credits on top of the new allowance. Lock order is
-  -- reservation rows first, then the balance row, the same as credits_release (no deadlock).
+  -- release or reconcile cannot add old-cycle credits on top of the new allowance.
   update public.credit_reservations set status = 'expired', resolved_at = now()
    where user_id = p_user and status = 'reserved';
-  select balance into v_old from public.credit_balances where user_id = p_user for update;
+  select balance into v_old from public.credit_balances where user_id = p_user;
   update public.credit_balances set balance = p_amount, updated_at = now() where user_id = p_user;
   insert into public.credit_ledger (user_id, delta, reason) values (p_user, p_amount - v_old, coalesce(p_reason, 'reset'));
   return p_amount;
@@ -227,6 +282,7 @@ revoke all on public.payment_events from anon, authenticated;
 --   {outcome: 'reuse', razorpay_subscription_id}       an unpaid checkout for the same plan exists: reuse it
 --   {outcome: 'active_exists'}                         refuse: the learner already has an active subscription
 --   {outcome: 'in_progress'}                           another request is creating the checkout right now
+--   {outcome: 'account_deleting'}                      refuse: the account is being deleted
 --   {outcome: 'supersede', row_id, razorpay_subscription_id}  an unpaid/halted subscription for another plan
 --                                                      exists: cancel it at Razorpay, then payments_close_checkout, then claim again
 create function public.payments_claim_checkout(p_user uuid, p_plan text) returns jsonb
@@ -234,7 +290,13 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_row public.subscriptions%rowtype;
   v_id uuid;
+  v_deleting timestamptz;
 begin
+  -- Level 1 lock: serialises with account deletion (account_begin_delete takes the same row lock).
+  select deleting_at into v_deleting from public.profiles where id = p_user for update;
+  if not found or (v_deleting is not null and v_deleting > now() - interval '10 minutes') then
+    return jsonb_build_object('outcome', 'account_deleting');
+  end if;
   select * into v_row from public.subscriptions
    where user_id = p_user and status in ('pending', 'active', 'halted') for update;
   if found then
@@ -276,12 +338,28 @@ language sql security definer set search_path = public as $$
    where id = p_row and status in ('pending', 'halted');
 $$;
 
-create function public.payments_attach_subscription(p_claim uuid, p_razorpay_subscription_id text) returns void
-language sql security definer set search_path = public as $$
+-- Stores the Razorpay subscription id on the caller's still-pending claim. Returns FALSE when it matched no
+-- row (claim gone, closed, already attached, or the account is being deleted): the caller must then treat
+-- the new Razorpay subscription as unattached (cancel it). Takes the profile lock first (level 1).
+create function public.payments_attach_subscription(p_claim uuid, p_razorpay_subscription_id text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_user uuid;
+  v_deleting timestamptz;
+begin
+  select user_id into v_user from public.subscriptions where id = p_claim; -- unlocked read
+  if not found then
+    return false;
+  end if;
+  select deleting_at into v_deleting from public.profiles where id = v_user for update;
+  if not found or (v_deleting is not null and v_deleting > now() - interval '10 minutes') then
+    return false;
+  end if;
   update public.subscriptions
      set razorpay_subscription_id = p_razorpay_subscription_id, updated_at = now()
    where id = p_claim and status = 'pending' and razorpay_subscription_id is null;
-$$;
+  return found;
+end $$;
 
 -- Releases a claim when Razorpay could not create the subscription.
 create function public.payments_abandon_checkout(p_claim uuid) returns void
@@ -414,9 +492,47 @@ language sql security definer set search_path = public as $$
   ) from public.profiles p where p.id = p_user;
 $$;
 
-create function public.account_delete(p_user uuid) returns void
+-- Step 1 of deletion. Takes the profile lock, sets the deleting marker (so no checkout can start or attach
+-- from now on) and returns the live subscription to cancel at Razorpay: {live: {...} | null}.
+-- Returns null if the account does not exist.
+create function public.account_begin_delete(p_user uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
+  perform 1 from public.profiles where id = p_user for update;
+  if not found then
+    return null;
+  end if;
+  update public.profiles set deleting_at = now() where id = p_user;
+  return jsonb_build_object('live', (
+    select to_jsonb(s) from (
+      select razorpay_subscription_id, status, plan_id from public.subscriptions
+       where user_id = p_user and status in ('pending', 'active', 'halted')
+    ) s));
+end $$;
+
+-- Called when the Razorpay cancel failed: the account stays, checkout is allowed again.
+create function public.account_cancel_delete(p_user uuid) returns void
+language sql security definer set search_path = public as $$
+  update public.profiles set deleting_at = null where id = p_user;
+$$;
+
+-- Step 2: only after account_begin_delete. Locks everything in the documented order, then deletes
+-- auth.users; the cascade removes profile, balance, reservations, ledger, hint log, saved code, subscriptions.
+create function public.account_delete(p_user uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_deleting timestamptz;
+begin
+  select deleting_at into v_deleting from public.profiles where id = p_user for update;
+  if not found then
+    return;
+  end if;
+  if v_deleting is null then
+    raise exception 'account_begin_delete must run first';
+  end if;
+  perform 1 from public.subscriptions where user_id = p_user for update;
+  perform 1 from public.credit_balances where user_id = p_user for update;
+  perform 1 from public.credit_reservations where user_id = p_user for update;
   delete from auth.users where id = p_user;
 end $$;
 
@@ -431,11 +547,11 @@ begin
     select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public' and p.proname in (
        'handle_new_user', 'credits_get_balance', 'credits_reserve', 'credits_release', 'credits_reset',
-       'credits_reconcile', 'credits_settle_hint',
+       'credits_reconcile', 'credits_settle_hint', '_credits_lock_balance', '_credits_release_locked',
        'hint_log_record', 'payments_claim_checkout', 'payments_attach_subscription',
        'payments_abandon_checkout', 'payments_close_checkout', 'payments_apply_event', 'payments_live_subscription',
        'saved_code_upsert', 'saved_code_list', 'saved_code_delete', 'saved_code_delete_all',
-       'account_get', 'account_delete')
+       'account_get', 'account_begin_delete', 'account_cancel_delete', 'account_delete')
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     if exists (select 1 from pg_roles where rolname = 'service_role') then

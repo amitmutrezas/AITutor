@@ -4,7 +4,6 @@ import { requireUser } from "../auth/session";
 import type { Authenticate } from "../auth/types";
 import { PLANS } from "../config";
 import { cancelRazorpaySubscription } from "../payments/razorpay";
-import type { PaymentStore } from "../payments/store";
 import type { AccountPort } from "./service";
 
 export const deleteAccountBody = z.strictObject({ confirm: z.literal("delete my account") });
@@ -12,7 +11,6 @@ export const deleteAccountBody = z.strictObject({ confirm: z.literal("delete my 
 export interface AccountDeps {
   authenticate: Authenticate;
   accounts: AccountPort;
-  payments: PaymentStore | null;
   keyId?: string;
   keySecret?: string;
   fetchFn?: typeof fetch;
@@ -48,24 +46,33 @@ export function createAccountHandlers(deps: AccountDeps) {
       const body = await readBody(req, deleteAccountBody);
       if (!body.ok) return body.response;
       const userId = auth.user.id;
+      let begun = false;
       try {
-        const live = deps.payments ? await deps.payments.liveSubscription(userId) : null;
-        if (live?.razorpaySubscriptionId) {
+        // 1. In the database: lock the account and set the deleting marker. From here no checkout can
+        //    start or attach, so the subscription list returned below is complete.
+        const state = await deps.accounts.beginDeletion(userId);
+        if (!state) return json(404, { error: "Not found" });
+        begun = true;
+        // 2. Cancel at Razorpay. ANY row with a subscription id blocks deletion if it cannot be
+        //    cancelled, including a pending checkout (it could still be paid after the account is gone).
+        //    On failure the marker is cleared: the account stays and works as before.
+        if (state.live?.razorpaySubscriptionId) {
           const cancelled = await cancelRazorpaySubscription(
             { keyId: deps.keyId, keySecret: deps.keySecret, fetchFn: deps.fetchFn },
-            live.razorpaySubscriptionId,
+            state.live.razorpaySubscriptionId,
           );
-          // ANY row with a Razorpay subscription id blocks deletion if it cannot be cancelled there,
-          // including a pending checkout: it could still be paid after the account is gone.
           if (!cancelled) {
+            await deps.accounts.cancelDeletion(userId);
             return json(502, {
               error: "We could not cancel your subscription, so your account was not deleted",
             });
           }
         }
+        // 3. Delete (cascade).
         await deps.accounts.delete(userId);
         return json(200, { deleted: true });
       } catch {
+        if (begun) await deps.accounts.cancelDeletion(userId).catch(() => undefined);
         return failed();
       }
     },

@@ -13,6 +13,7 @@ const claimResult = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("reuse"), razorpay_subscription_id: z.string() }),
   z.object({ outcome: z.literal("active_exists") }),
   z.object({ outcome: z.literal("in_progress") }),
+  z.object({ outcome: z.literal("account_deleting") }),
 ]);
 
 const applyOutcome = z.enum([
@@ -60,15 +61,17 @@ export function createSupabasePaymentStore(db: RpcClient): PaymentStore {
           return { kind: "active_exists" };
         case "in_progress":
           return { kind: "in_progress" };
+        case "account_deleting":
+          return { kind: "account_deleting" };
       }
     },
 
-    async attachSubscription(claimId, razorpaySubscriptionId) {
-      await callRpc(
+    attachSubscription(claimId, razorpaySubscriptionId) {
+      return callRpc(
         db,
         "payments_attach_subscription",
         { p_claim: claimId, p_razorpay_subscription_id: razorpaySubscriptionId },
-        z.unknown(),
+        z.boolean(),
       );
     },
 

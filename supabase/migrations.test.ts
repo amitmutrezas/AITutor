@@ -26,7 +26,7 @@ describe("M5 migration 0002", () => {
     expect(m2).toMatch(/create table public\.credit_reservations/);
     expect(m2).toMatch(/status in \('reserved', 'settled', 'released', 'expired'\)/);
     expect(m2).toMatch(/create function public\.credits_reconcile/);
-    expect(m2).toMatch(/for update skip locked/);
+    expect(m2).toMatch(/_credits_release_locked\(c\.id, p_timeout_seconds\)/);
     expect(m2).toMatch(/'credits_reconcile', 'credits_settle_hint'/);
   });
 
@@ -39,7 +39,8 @@ describe("M5 migration 0002", () => {
   it("C4: credits_reset expires open reservations in the same transaction, before touching the balance", () => {
     const fn = m2.match(/create function public\.credits_reset[\s\S]*?end \$\$;/)?.[0] ?? "";
     expect(fn).toMatch(/set status = 'expired'/);
-    expect(fn.indexOf("set status = 'expired'")).toBeLessThan(fn.indexOf("for update"));
+    expect(fn.indexOf("_credits_lock_balance(")).toBeGreaterThan(-1);
+    expect(fn.indexOf("_credits_lock_balance(")).toBeLessThan(fn.indexOf("set status = 'expired'"));
   });
 
   it("P1: a row with a Razorpay subscription is never closed locally by the claim; the caller must confirm", () => {
@@ -47,6 +48,66 @@ describe("M5 migration 0002", () => {
       m2.match(/create function public\.payments_claim_checkout[\s\S]*?end \$\$;/)?.[0] ?? "";
     expect(fn).toMatch(/'outcome', 'supersede'/);
     expect(m2).toMatch(/create function public\.payments_close_checkout/);
+  });
+
+  it("lock order: every credits function takes the balance lock before it locks or changes reservations", () => {
+    const body = (name: string) =>
+      m2.match(new RegExp(`create function public\\.${name}\\b[\\s\\S]*?end \\$\\$;`))?.[0] ?? "";
+    for (const name of [
+      "credits_reset",
+      "credits_reserve",
+      "credits_release",
+      "credits_settle_hint",
+      "credits_reconcile",
+    ]) {
+      const fn = body(name);
+      const lock = fn.indexOf("_credits_lock_balance(");
+      expect(lock, name).toBeGreaterThan(-1);
+      const firstReservationWrite = [
+        fn.indexOf("update public.credit_reservations"),
+        fn.indexOf("insert into public.credit_reservations"),
+        fn.indexOf("_credits_release_locked("),
+        fn.search(/from public\.credit_reservations where id = p_reservation for update/),
+      ].filter((i) => i >= 0);
+      for (const i of firstReservationWrite) expect(lock, name).toBeLessThan(i);
+    }
+    // The release helper never takes the balance lock itself: its callers must already hold it.
+    expect(body("_credits_release_locked")).not.toMatch(
+      /for update;[\s\S]*credit_balances[\s\S]*for update/,
+    );
+  });
+
+  it("lock order: reconcile visits candidates in a fixed order", () => {
+    expect(m2).toMatch(/order by user_id, created_at, id/);
+  });
+
+  it("A3/P1: checkout claim and attach take the profile lock and refuse while deleting_at is recent", () => {
+    for (const name of ["payments_claim_checkout", "payments_attach_subscription"]) {
+      const fn =
+        m2.match(new RegExp(`create function public\\.${name}\\b[\\s\\S]*?end \\$\\$;`))?.[0] ?? "";
+      expect(fn, name).toMatch(/from public\.profiles where id = [\w]+ for update/);
+      expect(fn, name).toContain("interval '10 minutes'");
+    }
+  });
+
+  it("P1: attach returns a boolean (false when no row was updated)", () => {
+    expect(m2).toMatch(
+      /payments_attach_subscription\(p_claim uuid, p_razorpay_subscription_id text\) returns boolean/,
+    );
+  });
+
+  it("A3: account_delete requires account_begin_delete and locks in the documented order", () => {
+    const fn = m2.match(/create function public\.account_delete[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(fn).toMatch(/account_begin_delete must run first/);
+    const order = [
+      "from public.profiles",
+      "from public.subscriptions",
+      "from public.credit_balances",
+      "from public.credit_reservations",
+      "delete from auth.users",
+    ].map((t) => fn.indexOf(t));
+    expect(order.every((i) => i > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
   it("P2: an unknown subscription is looked up before the event id is claimed", () => {

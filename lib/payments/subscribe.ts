@@ -54,6 +54,9 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
   } catch {
     return failed();
   }
+  if (claim.kind === "account_deleting") {
+    return json(409, { error: "Your account is being deleted" });
+  }
   if (claim.kind === "active_exists") {
     return json(409, { error: "You already have an active subscription" });
   }
@@ -92,15 +95,19 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
     return json(502, { error: "Could not start checkout" });
   }
 
-  // Razorpay now has a subscription we must be able to match. Store its id (one retry).
+  // Razorpay now has a subscription we must be able to match. Store its id. A thrown error is retried
+  // once; a FALSE result (the UPDATE matched no pending claim of ours) is final and takes the same
+  // recovery path as a failure.
+  let attached = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await store.attachSubscription(claim.claimId, created);
-      return json(200, { subscriptionId: created, keyId, planId });
+      attached = await store.attachSubscription(claim.claimId, created);
+      break;
     } catch {
       // retry once
     }
   }
+  if (attached) return json(200, { subscriptionId: created, keyId, planId });
   // Could not store the id. Cancel the new subscription so it cannot be paid without a record, then
   // release the claim. If the cancel fails too, KEEP the claim (do not abandon) and log the Razorpay id
   // durably so the subscription can be matched or cancelled by hand; webhooks for it are 503-retried.
@@ -114,6 +121,7 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
     console.error(
       JSON.stringify({
         event: "razorpay_subscription_unattached",
+        // Loud on purpose: this subscription exists at Razorpay without a matching row.
         userId,
         claimId: claim.claimId,
         razorpaySubscriptionId: created,

@@ -26,9 +26,11 @@ async function setup(opts: { fetchFn?: typeof fetch; liveSub?: "pending" | "acti
     tokensOut: 1,
     fallback: false,
   });
+  const payments = new InMemoryPaymentStore();
   const accounts = new InMemoryAccounts(
     { u1: { email: "u1@example.com", planKey: "basic", balance: 12 } },
     {
+      payments,
       onDelete: async (id) => {
         await savedCode.deleteAll(id);
         hintLog.entries.splice(
@@ -40,7 +42,6 @@ async function setup(opts: { fetchFn?: typeof fetch; liveSub?: "pending" | "acti
       },
     },
   );
-  const payments = new InMemoryPaymentStore();
   if (opts.liveSub) {
     const claim = await payments.claimCheckout("u1", "basic");
     if (claim.kind === "claimed") await payments.attachSubscription(claim.claimId, "sub_1");
@@ -58,7 +59,6 @@ async function setup(opts: { fetchFn?: typeof fetch; liveSub?: "pending" | "acti
   const h = createAccountHandlers({
     authenticate: auth,
     accounts,
-    payments,
     keyId: "k",
     keySecret: "s",
     fetchFn: opts.fetchFn,
@@ -157,5 +157,51 @@ describe("A3: delete account", () => {
     const { h, accounts } = await setup({ liveSub: "active", fetchFn });
     expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
     expect(await accounts.get("u1")).toBeNull();
+  });
+
+  it("A3/P1: a checkout cannot start while deletion is in progress, including during the Razorpay cancel", async () => {
+    let duringCancel: string | undefined;
+    const ref: { payments?: InMemoryPaymentStore } = {};
+    const fetchFn = (async () => {
+      // The deleting marker is already set when the cancel call is made.
+      duringCancel = (await ref.payments!.claimCheckout("u1", "advanced")).kind;
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    const { h, accounts, payments } = await setup({ liveSub: "active", fetchFn });
+    ref.payments = payments;
+    expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
+    expect(duringCancel).toBe("account_deleting");
+    expect(await accounts.get("u1")).toBeNull();
+    expect(payments.rows).toHaveLength(0); // no checkout slipped in before the cascade
+  });
+
+  it("A3/P1: a subscription claimed before deletion began is seen and cancelled; one attached after is refused", async () => {
+    const { h, payments } = await setup({
+      fetchFn: (async () => Response.json({})) as unknown as typeof fetch,
+    });
+    const claim = await payments.claimCheckout("u1", "basic"); // checkout in flight, id not attached yet
+    if (claim.kind !== "claimed") throw new Error("expected claim");
+    expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
+    // The in-flight request now tries to attach its new Razorpay subscription: refused (row gone / deleting).
+    expect(await payments.attachSubscription(claim.claimId, "sub_late")).toBe(false);
+  });
+
+  it("A3: when the cancel fails the deleting marker is cleared so checkout works again", async () => {
+    const fetchFn = (async () => new Response("x", { status: 500 })) as unknown as typeof fetch;
+    const { h, payments, accounts } = await setup({ liveSub: "active", fetchFn });
+    expect((await h.DELETE(req("DELETE", confirm))).status).toBe(502);
+    expect(payments.deleting.has("u1")).toBe(false);
+    expect(await accounts.get("u1")).not.toBeNull();
+  });
+
+  it("A3: an unknown account is a 404 and sets no marker", async () => {
+    const { h, payments } = await setup();
+    const r = new Request("http://x/api/account", {
+      method: "DELETE",
+      headers: { "x-test-user": "ghost" },
+      body: JSON.stringify(confirm),
+    });
+    expect((await h.DELETE(r)).status).toBe(404);
+    expect(payments.deleting.size).toBe(0);
   });
 });

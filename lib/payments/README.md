@@ -52,3 +52,40 @@ the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names a
   body with the webhook secret, header `X-Razorpay-Signature`, event id in `X-Razorpay-Event-Id`;
   subscription checkout = HMAC SHA256 of `razorpay_payment_id|razorpay_subscription_id` with the
   key secret.
+
+## Lock order (single, global) and who takes what
+
+Every SQL function below runs in one transaction and takes locks only in this order, possibly skipping levels.
+Two transactions therefore never wait on each other in a cycle. This is also asserted statically in
+`supabase/migrations.test.ts` and exercised (sequentially) with a throwaway Postgres; concurrent interleavings
+cannot be run in unit tests, so the order itself is the safety argument. When adding a function, take its locks in
+this order or do not add it.
+
+| Level | Lock                                            | Taken by                                                                                                                                                       |
+| ----- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `profiles` row (`FOR UPDATE`)                   | `account_begin_delete`, `account_cancel_delete`, `account_delete`, `payments_claim_checkout`, `payments_attach_subscription`                                   |
+| 2     | `subscriptions` row(s)                          | `payments_claim_checkout`, `payments_apply_event`, `account_delete` (`payments_close_checkout` and `payments_abandon_checkout` touch one row by id)            |
+| 3     | `credit_balances` row (`_credits_lock_balance`) | `credits_reserve`, `credits_release`, `credits_settle_hint`, `credits_reconcile`, `credits_reset` (also reached from `payments_apply_event`), `account_delete` |
+| 4     | `credit_reservations` rows                      | `_credits_release_locked` (via release and reconcile), `credits_settle_hint`, `credits_reset` (expires them), `account_delete`                                 |
+| 5     | `payment_events` insert (unique event id)       | `payments_apply_event`, always last                                                                                                                            |
+
+Rules that follow from it:
+
+- A function that only knows a reservation id reads its `user_id` without a lock, takes the balance lock (3), and only then
+  locks the reservation (4). `credits_reconcile` visits candidates ordered by user, so two reconciles cannot cross.
+- `credits_reset` takes the balance lock first. A concurrent `credits_reserve` either committed before (its reservation is
+  expired by the reset, no refund, C4) or waits and then reserves from the new allowance.
+- Checkout vs deletion: `payments_claim_checkout` and `payments_attach_subscription` lock the profile row and refuse while
+  `profiles.deleting_at` is under 10 minutes old. Deletion is three steps: `account_begin_delete` (locks the profile, sets the
+  marker, returns the live subscription), then the Razorpay cancel, then `account_delete` (requires the marker, locks 1-4,
+  cascades). If the cancel fails the marker is cleared (`account_cancel_delete`) and the account is unchanged. If the process
+  dies mid-way the marker expires on its own.
+- Handlers that mix Razorpay with the DB (`lib/payments/subscribe.ts`, `lib/account/handler.ts`) call the Razorpay side only
+  between two of these single-transaction steps and define what is true if the next step fails.
+
+Inventory of SQL functions that touch balance, reservations, subscriptions or the profile row: `credits_get_balance`
+(no lock, read), `credits_reserve`, `credits_release`, `credits_settle_hint`, `credits_reconcile`, `credits_reset`,
+`payments_claim_checkout`, `payments_attach_subscription`, `payments_close_checkout`, `payments_abandon_checkout`,
+`payments_apply_event`, `payments_live_subscription` (read), `account_get` (read), `account_begin_delete`,
+`account_cancel_delete`, `account_delete`. Handlers: `/api/hint` (reserve, settle or release), `/api/razorpay/webhook`
+(`applyEvent`), `/api/razorpay/subscribe`, `/api/account` DELETE, `/api/cron/reconcile-credits`.

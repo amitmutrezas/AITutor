@@ -12,7 +12,9 @@ export type ClaimResult =
   | { kind: "supersede"; rowId: string; razorpaySubscriptionId: string }
   | { kind: "reuse"; razorpaySubscriptionId: string }
   | { kind: "active_exists" }
-  | { kind: "in_progress" };
+  | { kind: "in_progress" }
+  /** The account is being deleted: no checkout may start. */
+  | { kind: "account_deleting" };
 
 /**
  * "unknown_subscription": no row has this Razorpay subscription id yet. The event id is NOT claimed,
@@ -49,7 +51,12 @@ export interface LiveSubscription {
 export interface PaymentStore {
   /** Idempotent checkout start: at most one live subscription per learner. */
   claimCheckout(userId: string, planId: PlanId): Promise<ClaimResult>;
-  attachSubscription(claimId: string, razorpaySubscriptionId: string): Promise<void>;
+  /**
+   * Stores the Razorpay subscription id on the caller's still-pending claim. Returns FALSE when no row
+   * was updated (claim gone or closed, already attached, account being deleted): the caller must treat
+   * the new Razorpay subscription as unattached.
+   */
+  attachSubscription(claimId: string, razorpaySubscriptionId: string): Promise<boolean>;
   /** Releases a claim when Razorpay could not create the subscription. */
   abandonCheckout(claimId: string): Promise<void>;
   /** Closes a superseded row after its Razorpay subscription was cancelled. */
@@ -76,6 +83,8 @@ export class InMemoryPaymentStore implements PaymentStore {
   readonly processed = new Set<string>();
   readonly rows: MemorySubscription[] = [];
   readonly credits = new Map<string, number>();
+  /** Users whose account deletion has begun (mirrors profiles.deleting_at). */
+  readonly deleting = new Set<string>();
   private seq = 0;
 
   constructor(private now: () => number = Date.now) {}
@@ -95,6 +104,7 @@ export class InMemoryPaymentStore implements PaymentStore {
   }
 
   async claimCheckout(userId: string, planId: PlanId): Promise<ClaimResult> {
+    if (this.deleting.has(userId)) return { kind: "account_deleting" };
     const row = this.live(userId);
     if (row) {
       if (row.status === "active") return { kind: "active_exists" };
@@ -128,9 +138,16 @@ export class InMemoryPaymentStore implements PaymentStore {
 
   async attachSubscription(claimId: string, razorpaySubscriptionId: string) {
     const row = this.rows.find((r) => r.id === claimId);
-    if (row && row.status === "pending" && row.razorpaySubscriptionId === null) {
-      row.razorpaySubscriptionId = razorpaySubscriptionId;
+    if (
+      !row ||
+      this.deleting.has(row.userId) ||
+      row.status !== "pending" ||
+      row.razorpaySubscriptionId !== null
+    ) {
+      return false;
     }
+    row.razorpaySubscriptionId = razorpaySubscriptionId;
+    return true;
   }
 
   async closeCheckout(rowId: string) {

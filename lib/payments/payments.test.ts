@@ -6,6 +6,7 @@ import { PAYMENT_PLANS, planIdFromRazorpayPlan } from "./plans";
 import { verifySubscriptionCheckoutSignature, verifyWebhookSignature } from "./signature";
 import { subscribeBody, handleSubscribe } from "./subscribe";
 import { InMemoryPaymentStore } from "./store";
+import { createSupabasePaymentStore } from "./supabase-store";
 import { POST as webhookRoute } from "../../app/api/razorpay/webhook/route";
 import { handleRazorpayWebhook } from "./webhook";
 
@@ -452,6 +453,82 @@ describe("N1: subscribe route", () => {
     }) as unknown as typeof fetch;
     const res = await handleSubscribe(post({ planId: "advanced" }), mk(store, { fetchFn }));
     expect(res.status).toBe(200);
+  });
+
+  it("P1: subscribe is refused while the account is being deleted, with no Razorpay call", async () => {
+    const store = new InMemoryPaymentStore();
+    store.deleting.add("u1");
+    const fetchFn = vi.fn();
+    const res = await handleSubscribe(post({ planId: "basic" }), mk(store, { fetchFn }));
+    expect(res.status).toBe(409);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it("P1: attachSubscription reports false when it matched no pending claim of the caller", async () => {
+    const store = new InMemoryPaymentStore();
+    expect(await store.attachSubscription("claim_missing", "sub_x")).toBe(false);
+    const c = await store.claimCheckout("u1", "basic");
+    if (c.kind !== "claimed") throw new Error("expected claim");
+    expect(await store.attachSubscription(c.claimId, "sub_1")).toBe(true);
+    expect(await store.attachSubscription(c.claimId, "sub_2")).toBe(false); // already attached
+    expect(store.rows[0].razorpaySubscriptionId).toBe("sub_1");
+    await store.abandonCheckout("nope");
+    const d = new InMemoryPaymentStore();
+    const c2 = await d.claimCheckout("u2", "basic");
+    if (c2.kind !== "claimed") throw new Error("expected claim");
+    d.deleting.add("u2");
+    expect(await d.attachSubscription(c2.claimId, "sub_3")).toBe(false); // account being deleted
+  });
+
+  it("P1: the Supabase adapter surfaces false from the attach function", async () => {
+    const client = { rpc: async () => ({ data: false, error: null }) };
+    expect(await createSupabasePaymentStore(client).attachSubscription("c", "s")).toBe(false);
+    const ok = { rpc: async () => ({ data: true, error: null }) };
+    expect(await createSupabasePaymentStore(ok).attachSubscription("c", "s")).toBe(true);
+  });
+
+  describe("P1: attach matched zero rows (returned false, did not throw)", () => {
+    const noMatch = (store: InMemoryPaymentStore) => {
+      store.attachSubscription = async () => false;
+    };
+
+    it("P1: the new Razorpay subscription is cancelled, without a pointless retry", async () => {
+      const store = new InMemoryPaymentStore();
+      let attempts = 0;
+      store.attachSubscription = async () => {
+        attempts++;
+        return false;
+      };
+      const calls: string[] = [];
+      const fetchFn = (async (url: string) => {
+        calls.push(url);
+        return Response.json({ id: "sub_new" });
+      }) as unknown as typeof fetch;
+      const res = await handleSubscribe(post({ planId: "basic" }), mk(store, { fetchFn }));
+      expect(res.status).toBe(502);
+      expect(attempts).toBe(1);
+      expect(calls).toContain("https://api.razorpay.com/v1/subscriptions/sub_new/cancel");
+      expect(store.rows.every((r) => r.status === "cancelled")).toBe(true);
+    });
+
+    it("P1: if that cancel fails too, the ids are logged loudly and the claim is kept", async () => {
+      const store = new InMemoryPaymentStore();
+      noMatch(store);
+      const fetchFn = (async (url: string, init?: RequestInit) =>
+        url.endsWith("/v1/subscriptions") && init?.method === "POST"
+          ? Response.json({ id: "sub_zero" })
+          : new Response("down", { status: 500 })) as unknown as typeof fetch;
+      const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const res = await handleSubscribe(post({ planId: "basic" }), mk(store, { fetchFn }));
+      const logged = errors.mock.calls.flat().map(String).join("\n");
+      errors.mockRestore();
+      expect(res.status).toBe(502);
+      expect(logged).toContain("razorpay_subscription_unattached");
+      expect(logged).toContain("sub_zero");
+      expect(logged).toContain("claim_");
+      expect(store.rows[0].status).toBe("pending");
+    });
   });
 
   describe("P1: Razorpay created the subscription but the DB could not store its id", () => {

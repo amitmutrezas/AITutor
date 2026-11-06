@@ -10,7 +10,6 @@ function handlers() {
     ? createAccountHandlers({
         authenticate: s.authenticate,
         accounts: s.accounts,
-        payments: s.payments,
         keyId: process.env.RAZORPAY_KEY_ID,
         keySecret: process.env.RAZORPAY_KEY_SECRET,
       })
