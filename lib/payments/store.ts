@@ -4,7 +4,12 @@ import type { PlanId } from "./plans";
 export type SubscriptionStatus = "pending" | "active" | "halted" | "cancelled";
 
 export type ClaimResult =
-  | { kind: "claimed"; claimId: string; supersededSubscriptionId?: string }
+  | { kind: "claimed"; claimId: string }
+  /**
+   * An unpaid or halted subscription for another plan exists at Razorpay. The caller must cancel it
+   * there and only then call closeCheckout; until then nothing has changed locally.
+   */
+  | { kind: "supersede"; rowId: string; razorpaySubscriptionId: string }
   | { kind: "reuse"; razorpaySubscriptionId: string }
   | { kind: "active_exists" }
   | { kind: "in_progress" };
@@ -47,6 +52,8 @@ export interface PaymentStore {
   attachSubscription(claimId: string, razorpaySubscriptionId: string): Promise<void>;
   /** Releases a claim when Razorpay could not create the subscription. */
   abandonCheckout(claimId: string): Promise<void>;
+  /** Closes a superseded row after its Razorpay subscription was cancelled. */
+  closeCheckout(rowId: string): Promise<void>;
   applyEvent(input: ApplyEventInput): Promise<ApplyOutcome>;
   liveSubscription(userId: string): Promise<LiveSubscription | null>;
 }
@@ -89,7 +96,6 @@ export class InMemoryPaymentStore implements PaymentStore {
 
   async claimCheckout(userId: string, planId: PlanId): Promise<ClaimResult> {
     const row = this.live(userId);
-    let superseded: string | undefined;
     if (row) {
       if (row.status === "active") return { kind: "active_exists" };
       if (row.status === "pending" && row.planId === planId) {
@@ -98,7 +104,13 @@ export class InMemoryPaymentStore implements PaymentStore {
         }
         if (row.createdAt > this.now() - STALE_CLAIM_MS) return { kind: "in_progress" };
       }
-      superseded = row.razorpaySubscriptionId ?? undefined;
+      if (row.razorpaySubscriptionId) {
+        return {
+          kind: "supersede",
+          rowId: row.id,
+          razorpaySubscriptionId: row.razorpaySubscriptionId,
+        };
+      }
       row.status = "cancelled";
     }
     const id = `claim_${++this.seq}`;
@@ -111,7 +123,7 @@ export class InMemoryPaymentStore implements PaymentStore {
       createdAt: this.now(),
       lastEventAt: null,
     });
-    return { kind: "claimed", claimId: id, supersededSubscriptionId: superseded };
+    return { kind: "claimed", claimId: id };
   }
 
   async attachSubscription(claimId: string, razorpaySubscriptionId: string) {
@@ -119,6 +131,11 @@ export class InMemoryPaymentStore implements PaymentStore {
     if (row && row.status === "pending" && row.razorpaySubscriptionId === null) {
       row.razorpaySubscriptionId = razorpaySubscriptionId;
     }
+  }
+
+  async closeCheckout(rowId: string) {
+    const row = this.rows.find((r) => r.id === rowId);
+    if (row && (row.status === "pending" || row.status === "halted")) row.status = "cancelled";
   }
 
   async abandonCheckout(claimId: string) {

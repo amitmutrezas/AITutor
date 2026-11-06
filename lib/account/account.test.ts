@@ -63,7 +63,7 @@ async function setup(opts: { fetchFn?: typeof fetch; liveSub?: "pending" | "acti
     keySecret: "s",
     fetchFn: opts.fetchFn,
   });
-  return { h, savedCode, hintLog, credits, accounts };
+  return { h, savedCode, hintLog, credits, accounts, payments };
 }
 const req = (method: string, body?: unknown, user: string | null = "u1") =>
   new Request("http://x/api/account", {
@@ -131,9 +131,30 @@ describe("A3: delete account", () => {
     expect(await savedCode.list("u1")).toHaveLength(1);
   });
 
-  it("A3: an unpaid pending checkout does not block deletion", async () => {
+  it("A3: a failed cancel blocks deletion for ANY row with a Razorpay subscription id, including pending", async () => {
     const fetchFn = (async () => new Response("x", { status: 400 })) as unknown as typeof fetch;
-    const { h, accounts } = await setup({ liveSub: "pending", fetchFn });
+    const { h, accounts, savedCode } = await setup({ liveSub: "pending", fetchFn });
+    const res = await h.DELETE(req("DELETE", confirm));
+    expect(res.status).toBe(502);
+    expect(await accounts.get("u1")).not.toBeNull();
+    expect(await savedCode.list("u1")).toHaveLength(1);
+  });
+
+  it("A3: a pending row that never reached Razorpay (no id) has nothing to cancel and does not block", async () => {
+    const fetchFn = vi.fn();
+    const { h, accounts, payments } = await setup({ fetchFn: fetchFn as unknown as typeof fetch });
+    await payments.claimCheckout("u1", "basic"); // claimed, id never attached
+    expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(await accounts.get("u1")).toBeNull();
+  });
+
+  it("A3: retrying after a delete failed, when Razorpay already cancelled the subscription, succeeds", async () => {
+    const fetchFn = (async (url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response("already cancelled", { status: 400 })
+        : Response.json({ status: "cancelled" })) as unknown as typeof fetch;
+    const { h, accounts } = await setup({ liveSub: "active", fetchFn });
     expect((await h.DELETE(req("DELETE", confirm))).status).toBe(200);
     expect(await accounts.get("u1")).toBeNull();
   });

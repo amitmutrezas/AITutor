@@ -55,8 +55,9 @@ export function createAccountHandlers(deps: AccountDeps) {
             { keyId: deps.keyId, keySecret: deps.keySecret, fetchFn: deps.fetchFn },
             live.razorpaySubscriptionId,
           );
-          // An unpaid (pending) checkout is harmless if Razorpay refuses to cancel it.
-          if (!cancelled && live.status !== "pending") {
+          // ANY row with a Razorpay subscription id blocks deletion if it cannot be cancelled there,
+          // including a pending checkout: it could still be paid after the account is gone.
+          if (!cancelled) {
             return json(502, {
               error: "We could not cancel your subscription, so your account was not deleted",
             });

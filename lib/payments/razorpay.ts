@@ -32,7 +32,26 @@ export async function cancelRazorpaySubscription(
         body: JSON.stringify({ cancel_at_cycle_end: 0 }),
       },
     );
-    return res.ok;
+    if (res.ok) return true;
+    // Idempotent for retries (for example after a failed account delete): already cancelled is success.
+    return await isCancelledAtRazorpay(deps, subscriptionId);
+  } catch {
+    return false;
+  }
+}
+
+async function isCancelledAtRazorpay(
+  deps: RazorpayApiDeps,
+  subscriptionId: string,
+): Promise<boolean> {
+  try {
+    const res = await (deps.fetchFn ?? fetch)(
+      `${BASE}/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      { headers: { authorization: razorpayAuthHeader(deps.keyId!, deps.keySecret!) } },
+    );
+    if (!res.ok) return false;
+    const body = (await res.json()) as { status?: unknown };
+    return body.status === "cancelled";
   } catch {
     return false;
   }

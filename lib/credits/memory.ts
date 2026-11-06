@@ -1,7 +1,7 @@
 import { CREDITS } from "../config";
 import { assertCost, type CreditsPort, type Reservation, type SettleEntry } from "./types";
 
-type Status = "reserved" | "settled" | "released";
+type Status = "reserved" | "settled" | "released" | "expired";
 interface Row {
   id: string;
   userId: string;
@@ -88,6 +88,10 @@ export class InMemoryCredits implements CreditsPort {
   reset(userId: string, amount: number, reason = "reset"): void {
     if (!Number.isInteger(amount) || amount < 0)
       throw new RangeError("amount must be a non-negative integer");
+    // C4: old-cycle reservations are closed without refund, as in credits_reset.
+    for (const r of this.reservations.values()) {
+      if (r.userId === userId && r.status === "reserved") r.status = "expired";
+    }
     const old = this.balances.get(userId) ?? 0;
     this.balances.set(userId, amount);
     this.ledger.push({ userId, delta: amount - old, reason });

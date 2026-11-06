@@ -35,6 +35,14 @@ the single source of truth; `plans.ts` derives from it. The `RAZORPAY_*` names a
   and status and resets credits, all in one transaction.
 - A webhook for a subscription id no row has yet (it can beat `attachSubscription`) does not claim the event id and
   answers a retryable 503, so Razorpay's retry is applied once the id is attached.
+- Ordering rule: Razorpay calls and DB writes are never assumed to succeed together. Switching plans cancels the
+  old subscription at Razorpay first and only then closes the old row (`payments_close_checkout`); a failed cancel
+  stops the request with nothing changed. If Razorpay created a subscription but its id cannot be stored, the new
+  subscription is cancelled; if that fails too the claim row is kept and `razorpay_subscription_unattached` is
+  logged with the id. Account deletion is blocked if any row with a Razorpay subscription id (even pending) cannot
+  be cancelled there. A renewal reset (`credits_reset`) expires open credit reservations with no refund (C4).
+- `/api/cron/reconcile-credits` (vercel.json, every 5 minutes, `Authorization: Bearer $CRON_SECRET`) releases stale
+  credit reservations. Vercel Cron needs a plan that allows sub-daily schedules.
 - `/api/razorpay/subscribe` uses the real session (`lib/auth`). The checkout attempt is claimed in the
   database before Razorpay is called: a pending checkout for the same plan is reused, an active
   subscription is refused (409), and a pending checkout for another plan is closed at Razorpay.

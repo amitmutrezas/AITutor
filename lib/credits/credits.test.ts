@@ -90,6 +90,20 @@ describe("C2: credits port (in-memory fake)", () => {
     expect(await credits.balance("u1")).toBe(5);
   });
 
+  it("C4: a renewal reset expires old-cycle reservations without refund: release and reconcile cannot add to the new allowance", async () => {
+    let t = 0;
+    const credits = new InMemoryCredits({ u1: 10 }, { now: () => t });
+    const r = (await credits.reserve("u1", 3))!;
+    credits.reset("u1", 30, "subscription_renewal");
+    expect(await credits.balance("u1")).toBe(30);
+    expect(await credits.release(r.id)).toBe(false);
+    expect(await credits.balance("u1")).toBe(30);
+    t += CREDITS.reservationTimeoutSeconds * 1000 * 2;
+    expect(await credits.reconcile()).toBe(0);
+    expect(await credits.settle(r.id, entry)).toBe(false);
+    expect(await credits.balance("u1")).toBe(30);
+  });
+
   it("3.2: reconcile releases only stale open reservations", async () => {
     let t = 0;
     const credits = new InMemoryCredits({ u1: 5, u2: 5 }, { now: () => t });

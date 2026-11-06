@@ -33,6 +33,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Skip static assets, the sandboxed worker script and the signature-authenticated webhook.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|runner/worker\\.js|api/razorpay/webhook).*)",
+    "/((?!_next/static|_next/image|favicon.ico|runner/worker\\.js|api/razorpay/webhook|api/cron).*)",
   ],
 };

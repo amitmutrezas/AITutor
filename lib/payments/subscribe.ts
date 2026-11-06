@@ -36,30 +36,35 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
   if (!deps.keyId || !deps.keySecret || !rzpPlan || !deps.store) return unavailable();
   const { keyId, keySecret, store } = deps;
 
+  // Ordering rule for this whole file: a Razorpay side effect and a DB write are never assumed to
+  // succeed together. Every step below says what is true if the NEXT step fails.
+  const rzp = { keyId, keySecret, fetchFn: deps.fetchFn };
   let claim;
   try {
     claim = await store.claimCheckout(userId, planId);
+    if (claim.kind === "supersede") {
+      // Cancel the old unpaid/halted subscription at Razorpay FIRST. If that fails we stop: the old row
+      // is untouched locally and no replacement is created (so there is never a second live subscription).
+      if (!(await cancelRazorpaySubscription(rzp, claim.razorpaySubscriptionId))) {
+        return json(502, { error: "Could not switch plans right now. Try again in a moment" });
+      }
+      await store.closeCheckout(claim.rowId);
+      claim = await store.claimCheckout(userId, planId);
+    }
   } catch {
     return failed();
   }
   if (claim.kind === "active_exists") {
     return json(409, { error: "You already have an active subscription" });
   }
-  if (claim.kind === "in_progress") {
+  if (claim.kind === "in_progress" || claim.kind === "supersede") {
     return json(409, { error: "Checkout is already starting. Try again in a moment" });
   }
   if (claim.kind === "reuse") {
     return json(200, { subscriptionId: claim.razorpaySubscriptionId, keyId, planId });
   }
 
-  if (claim.supersededSubscriptionId) {
-    // Best effort: close the unpaid checkout for the other plan so it cannot be paid later by accident.
-    await cancelRazorpaySubscription(
-      { keyId, keySecret, fetchFn: deps.fetchFn },
-      claim.supersededSubscriptionId,
-    );
-  }
-
+  let created: string;
   try {
     const res = await (deps.fetchFn ?? fetch)("https://api.razorpay.com/v1/subscriptions", {
       method: "POST",
@@ -75,13 +80,10 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
       }),
     });
     const data = res.ok ? z.object({ id: z.string().min(1) }).safeParse(await res.json()) : null;
-    if (!data?.success) {
-      await store.abandonCheckout(claim.claimId);
-      return json(502, { error: "Could not start checkout" });
-    }
-    await store.attachSubscription(claim.claimId, data.data.id);
-    return json(200, { subscriptionId: data.data.id, keyId, planId });
+    if (!data?.success) throw new Error("no subscription id");
+    created = data.data.id;
   } catch {
+    // Razorpay gave us no id, so there is nothing to cancel or match: release the claim.
     try {
       await store.abandonCheckout(claim.claimId);
     } catch {
@@ -89,4 +91,34 @@ export async function handleSubscribe(request: Request, deps: SubscribeDeps): Pr
     }
     return json(502, { error: "Could not start checkout" });
   }
+
+  // Razorpay now has a subscription we must be able to match. Store its id (one retry).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await store.attachSubscription(claim.claimId, created);
+      return json(200, { subscriptionId: created, keyId, planId });
+    } catch {
+      // retry once
+    }
+  }
+  // Could not store the id. Cancel the new subscription so it cannot be paid without a record, then
+  // release the claim. If the cancel fails too, KEEP the claim (do not abandon) and log the Razorpay id
+  // durably so the subscription can be matched or cancelled by hand; webhooks for it are 503-retried.
+  if (await cancelRazorpaySubscription(rzp, created)) {
+    try {
+      await store.abandonCheckout(claim.claimId);
+    } catch {
+      // expires on its own
+    }
+  } else {
+    console.error(
+      JSON.stringify({
+        event: "razorpay_subscription_unattached",
+        userId,
+        claimId: claim.claimId,
+        razorpaySubscriptionId: created,
+      }),
+    );
+  }
+  return json(502, { error: "Could not start checkout" });
 }

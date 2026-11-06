@@ -24,7 +24,7 @@ describe("M5 migration 0002", () => {
 
   it("3.2: reservations have ids and statuses and a service-role reconcile releases stale ones", () => {
     expect(m2).toMatch(/create table public\.credit_reservations/);
-    expect(m2).toMatch(/status in \('reserved', 'settled', 'released'\)/);
+    expect(m2).toMatch(/status in \('reserved', 'settled', 'released', 'expired'\)/);
     expect(m2).toMatch(/create function public\.credits_reconcile/);
     expect(m2).toMatch(/for update skip locked/);
     expect(m2).toMatch(/'credits_reconcile', 'credits_settle_hint'/);
@@ -34,6 +34,19 @@ describe("M5 migration 0002", () => {
     const fn = m2.match(/create function public\.credits_settle_hint[\s\S]*?end \$\$;/)?.[0] ?? "";
     expect(fn).toMatch(/insert into public\.hint_log/);
     expect(fn).toMatch(/set status = 'settled'/);
+  });
+
+  it("C4: credits_reset expires open reservations in the same transaction, before touching the balance", () => {
+    const fn = m2.match(/create function public\.credits_reset[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(fn).toMatch(/set status = 'expired'/);
+    expect(fn.indexOf("set status = 'expired'")).toBeLessThan(fn.indexOf("for update"));
+  });
+
+  it("P1: a row with a Razorpay subscription is never closed locally by the claim; the caller must confirm", () => {
+    const fn =
+      m2.match(/create function public\.payments_claim_checkout[\s\S]*?end \$\$;/)?.[0] ?? "";
+    expect(fn).toMatch(/'outcome', 'supersede'/);
+    expect(m2).toMatch(/create function public\.payments_close_checkout/);
   });
 
   it("P2: an unknown subscription is looked up before the event id is claimed", () => {

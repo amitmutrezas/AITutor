@@ -4,10 +4,11 @@ import { PLAN_IDS } from "./plans";
 import type { ApplyOutcome, ClaimResult, LiveSubscription, PaymentStore } from "./store";
 
 const claimResult = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("claimed"), claim_id: z.string() }),
   z.object({
-    outcome: z.literal("claimed"),
-    claim_id: z.string(),
-    superseded_subscription_id: z.string().nullish(),
+    outcome: z.literal("supersede"),
+    row_id: z.string(),
+    razorpay_subscription_id: z.string(),
   }),
   z.object({ outcome: z.literal("reuse"), razorpay_subscription_id: z.string() }),
   z.object({ outcome: z.literal("active_exists") }),
@@ -46,10 +47,12 @@ export function createSupabasePaymentStore(db: RpcClient): PaymentStore {
       );
       switch (r.outcome) {
         case "claimed":
+          return { kind: "claimed", claimId: r.claim_id };
+        case "supersede":
           return {
-            kind: "claimed",
-            claimId: r.claim_id,
-            supersededSubscriptionId: r.superseded_subscription_id ?? undefined,
+            kind: "supersede",
+            rowId: r.row_id,
+            razorpaySubscriptionId: r.razorpay_subscription_id,
           };
         case "reuse":
           return { kind: "reuse", razorpaySubscriptionId: r.razorpay_subscription_id };
@@ -67,6 +70,10 @@ export function createSupabasePaymentStore(db: RpcClient): PaymentStore {
         { p_claim: claimId, p_razorpay_subscription_id: razorpaySubscriptionId },
         z.unknown(),
       );
+    },
+
+    async closeCheckout(rowId) {
+      await callRpc(db, "payments_close_checkout", { p_row: rowId }, z.unknown());
     },
 
     async abandonCheckout(claimId) {

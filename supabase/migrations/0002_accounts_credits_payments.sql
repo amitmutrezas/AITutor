@@ -59,12 +59,12 @@ $$;
 
 -- Every reservation has an id and a status, so a reservation that was never released or settled
 -- (crash, DB blip) can be found and given back later (credits_reconcile). Status moves only
--- reserved -> settled or reserved -> released, and only once.
+-- reserved -> settled, released or expired (a renewal reset closes it with no refund), and only once.
 create table public.credit_reservations (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
   cost integer not null check (cost > 0),
-  status text not null default 'reserved' check (status in ('reserved', 'settled', 'released')),
+  status text not null default 'reserved' check (status in ('reserved', 'settled', 'released', 'expired')),
   hint_log_id uuid references public.hint_log (id),
   created_at timestamptz not null default now(),
   resolved_at timestamptz
@@ -159,7 +159,8 @@ begin
   return true;
 end $$;
 
--- Sets the balance to p_amount (C4: renewal resets, no rollover). The ledger records the difference.
+-- Sets the balance to p_amount (C4: renewal resets, no rollover) and expires open reservations without
+-- refund. The ledger records the difference.
 create function public.credits_reset(p_user uuid, p_amount integer, p_reason text) returns integer
 language plpgsql security definer set search_path = public as $$
 declare
@@ -169,6 +170,11 @@ begin
     raise exception 'amount must be a non-negative integer';
   end if;
   insert into public.credit_balances (user_id, balance) values (p_user, 0) on conflict (user_id) do nothing;
+  -- C4: reservations from the old cycle are closed WITHOUT refund, in this same transaction, so a later
+  -- release or reconcile cannot add old-cycle credits on top of the new allowance. Lock order is
+  -- reservation rows first, then the balance row, the same as credits_release (no deadlock).
+  update public.credit_reservations set status = 'expired', resolved_at = now()
+   where user_id = p_user and status = 'reserved';
   select balance into v_old from public.credit_balances where user_id = p_user for update;
   update public.credit_balances set balance = p_amount, updated_at = now() where user_id = p_user;
   insert into public.credit_ledger (user_id, delta, reason) values (p_user, p_amount - v_old, coalesce(p_reason, 'reset'));
@@ -221,13 +227,13 @@ revoke all on public.payment_events from anon, authenticated;
 --   {outcome: 'reuse', razorpay_subscription_id}       an unpaid checkout for the same plan exists: reuse it
 --   {outcome: 'active_exists'}                         refuse: the learner already has an active subscription
 --   {outcome: 'in_progress'}                           another request is creating the checkout right now
--- 'superseded_subscription_id' is set when an unpaid checkout for another plan was closed.
+--   {outcome: 'supersede', row_id, razorpay_subscription_id}  an unpaid/halted subscription for another plan
+--                                                      exists: cancel it at Razorpay, then payments_close_checkout, then claim again
 create function public.payments_claim_checkout(p_user uuid, p_plan text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_row public.subscriptions%rowtype;
   v_id uuid;
-  v_superseded text;
 begin
   select * into v_row from public.subscriptions
    where user_id = p_user and status in ('pending', 'active', 'halted') for update;
@@ -243,8 +249,15 @@ begin
         return jsonb_build_object('outcome', 'in_progress');
       end if;
     end if;
-    -- halted, a pending checkout for another plan, or a stale claim that never reached Razorpay: close it.
-    v_superseded := v_row.razorpay_subscription_id;
+    -- A halted row or a pending checkout for another plan that exists at Razorpay must be cancelled THERE
+    -- first. Nothing changes locally until the caller confirms with payments_close_checkout, so a failed
+    -- Razorpay cancel leaves the old row (and the learner's state) exactly as it was.
+    if v_row.razorpay_subscription_id is not null then
+      return jsonb_build_object(
+        'outcome', 'supersede', 'row_id', v_row.id,
+        'razorpay_subscription_id', v_row.razorpay_subscription_id);
+    end if;
+    -- A claim that never reached Razorpay (stale, or for another plan): safe to close locally.
     update public.subscriptions set status = 'cancelled', updated_at = now() where id = v_row.id;
   end if;
   begin
@@ -253,8 +266,15 @@ begin
   exception when unique_violation then
     return jsonb_build_object('outcome', 'in_progress');
   end;
-  return jsonb_build_object('outcome', 'claimed', 'claim_id', v_id, 'superseded_subscription_id', v_superseded);
+  return jsonb_build_object('outcome', 'claimed', 'claim_id', v_id);
 end $$;
+
+-- Closes a pending or halted row AFTER its Razorpay subscription was cancelled there.
+create function public.payments_close_checkout(p_row uuid) returns void
+language sql security definer set search_path = public as $$
+  update public.subscriptions set status = 'cancelled', updated_at = now()
+   where id = p_row and status in ('pending', 'halted');
+$$;
 
 create function public.payments_attach_subscription(p_claim uuid, p_razorpay_subscription_id text) returns void
 language sql security definer set search_path = public as $$
@@ -413,7 +433,7 @@ begin
        'handle_new_user', 'credits_get_balance', 'credits_reserve', 'credits_release', 'credits_reset',
        'credits_reconcile', 'credits_settle_hint',
        'hint_log_record', 'payments_claim_checkout', 'payments_attach_subscription',
-       'payments_abandon_checkout', 'payments_apply_event', 'payments_live_subscription',
+       'payments_abandon_checkout', 'payments_close_checkout', 'payments_apply_event', 'payments_live_subscription',
        'saved_code_upsert', 'saved_code_list', 'saved_code_delete', 'saved_code_delete_all',
        'account_get', 'account_delete')
   loop

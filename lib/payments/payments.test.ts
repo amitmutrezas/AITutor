@@ -244,7 +244,10 @@ describe("P2: webhook handler", () => {
   it("P2: a stale subscription (replaced checkout) can no longer change plan or credits", async () => {
     const store = new InMemoryPaymentStore();
     await attach(store, "u1", "sub_old", "basic");
-    // The learner switches plans: the unpaid basic checkout is closed, a new one is claimed.
+    // The learner switches plans: the unpaid basic checkout is cancelled at Razorpay, closed, and a new one claimed.
+    const sw = await store.claimCheckout("u1", "advanced");
+    if (sw.kind !== "supersede") throw new Error("expected supersede");
+    await store.closeCheckout(sw.rowId);
     await attach(store, "u1", "sub_new", "advanced");
     const res = await handleRazorpayWebhook(
       hook(event("subscription.charged", { sub: "sub_old" }), { id: "e1" }),
@@ -421,6 +424,90 @@ describe("N1: subscribe route", () => {
     expect(store.rows.find((r) => r.razorpaySubscriptionId === "sub_old")?.status).toBe(
       "cancelled",
     );
+  });
+
+  it("P1: if cancelling the superseded Razorpay subscription fails, nothing changes and no replacement is created", async () => {
+    const store = await checkedOut("u1", "sub_old", "basic");
+    const calls: { url: string; method?: string }[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method });
+      return new Response("nope", { status: 500 });
+    }) as unknown as typeof fetch;
+    const res = await handleSubscribe(post({ planId: "advanced" }), mk(store, { fetchFn }));
+    expect(res.status).toBe(502);
+    expect(calls.some((c) => c.url.endsWith("/v1/subscriptions") && c.method === "POST")).toBe(
+      false,
+    );
+    const old = store.rows.find((r) => r.razorpaySubscriptionId === "sub_old");
+    expect(old?.status).toBe("pending"); // not marked cancelled locally
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it("P1: a plan switch retried after Razorpay already cancelled the old subscription succeeds (idempotent)", async () => {
+    const store = await checkedOut("u1", "sub_old", "basic");
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/sub_old/cancel")) return new Response("already", { status: 400 });
+      if (url.endsWith("/sub_old") && !init?.method) return Response.json({ status: "cancelled" });
+      return Response.json({ id: "sub_new" });
+    }) as unknown as typeof fetch;
+    const res = await handleSubscribe(post({ planId: "advanced" }), mk(store, { fetchFn }));
+    expect(res.status).toBe(200);
+  });
+
+  describe("P1: Razorpay created the subscription but the DB could not store its id", () => {
+    const failingAttach = (store: InMemoryPaymentStore) => {
+      store.attachSubscription = async () => {
+        throw new Error("db down");
+      };
+    };
+
+    it("P1: the new Razorpay subscription is cancelled and the claim is released", async () => {
+      const store = new InMemoryPaymentStore();
+      failingAttach(store);
+      const calls: string[] = [];
+      const fetchFn = (async (url: string) => {
+        calls.push(url);
+        return Response.json({ id: "sub_new" });
+      }) as unknown as typeof fetch;
+      const res = await handleSubscribe(post({ planId: "basic" }), mk(store, { fetchFn }));
+      expect(res.status).toBe(502);
+      expect(calls).toContain("https://api.razorpay.com/v1/subscriptions/sub_new/cancel");
+      expect(store.rows.every((r) => r.status === "cancelled")).toBe(true);
+    });
+
+    it("P1: if that cancel also fails the claim is kept and the Razorpay id is logged durably", async () => {
+      const store = new InMemoryPaymentStore();
+      failingAttach(store);
+      const fetchFn = (async (url: string, init?: RequestInit) =>
+        url.endsWith("/v1/subscriptions") && init?.method === "POST"
+          ? Response.json({ id: "sub_orphan" })
+          : new Response("down", { status: 500 })) as unknown as typeof fetch;
+      const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const res = await handleSubscribe(post({ planId: "basic" }), mk(store, { fetchFn }));
+      const logged = errors.mock.calls.flat().map(String).join("\n");
+      errors.mockRestore();
+      expect(res.status).toBe(502);
+      expect(logged).toContain("razorpay_subscription_unattached");
+      expect(logged).toContain("sub_orphan");
+      expect(store.rows).toHaveLength(1);
+      expect(store.rows[0].status).toBe("pending"); // claim kept, not abandoned
+    });
+
+    it("P1: a single attach failure is retried and checkout still succeeds", async () => {
+      const store = new InMemoryPaymentStore();
+      const real = store.attachSubscription.bind(store);
+      let fail = 1;
+      store.attachSubscription = async (c, id) => {
+        if (fail-- > 0) throw new Error("blip");
+        return real(c, id);
+      };
+      const res = await handleSubscribe(
+        post({ planId: "basic" }),
+        mk(store, { fetchFn: okFetch("sub_ok") }),
+      );
+      expect(res.status).toBe(200);
+      expect(store.rows[0].razorpaySubscriptionId).toBe("sub_ok");
+    });
   });
 
   it("P3: when Razorpay fails the claim is released so the learner can retry", async () => {
